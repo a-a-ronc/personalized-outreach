@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"c:\\\\Users\\\\AaronCendejas\\\\World Class Integration\\\\Engineering 2 - Documents\\\\Software\\\\personalized-outreach\" log --oneline --all -10)",
+      "Bash(git -C:*)",
+      "Bash(wc:*)",
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(mkdir:*)",
+      "Bash(C:UsersAaronCendejasAppDataLocalProgramsPythonPython312python.exe main.py --input data/aviation_medical_equipment_with_icp_full.csv --output output/campaigns.csv --limit 10)",
+      "Bash(py main.py:*)"
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+You are generating a single personalization sentence for a B2B outreach email.
+
+CONTEXT:
+- Industry: {{industry}}
+- ICP Notes: {{icp_notes}}
+- Company: {{company_name}}
+
+REQUIREMENTS:
+1. Generate ONE sentence only (18-25 words max)
+2. Sound like an engineer having a conversation, not a marketer
+3. NEVER use phrases like "I noticed", "I saw", "I came across"
+4. NEVER make specific claims about their operations unless directly stated in ICP notes
+5. Focus on general industry pain points relevant to their segment
+6. Be conversational but professional
+
+APPROVED SENTENCE STARTERS:
+- "We often see teams dealing with..."
+- "Many operations reach a point where..."
+- "In growing [industry] environments..."
+- "As [industry] operations scale..."
+
+BAD EXAMPLES (NEVER DO THIS):
+❌ "I noticed your team is struggling with inventory accuracy"
+❌ "Your operation likely faces challenges with..."
+❌ "After researching your company, I saw that..."
+
+GOOD EXAMPLES:
+✓ "We often see 3PL operations hitting a wall when manual processes can't keep up with volume."
+✓ "Many warehousing teams reach a point where spreadsheets become a liability rather than a tool."
+✓ "In growing cold chain environments, accuracy and speed start competing rather than coexisting."
+
+Generate the personalization sentence now:

@@ -1,0 +1,11 @@
+Subject: Re: Quick thought on {{industry}} operations
+
+Hi {{first_name}},
+
+Following up on my note from last week about [BRIEF CALLBACK TO PROBLEM].
+
+{{personalization_sentence}}
+
+If timing's right to explore this, I'm happy to share what's working for similar operations.
+
+{{signature}}
