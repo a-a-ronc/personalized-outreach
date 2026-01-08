@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from pathlib import Path
 import pandas as pd
@@ -12,6 +13,140 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+ROLE_LEVEL_KEYWORDS = {
+    "c_suite": ["ceo", "coo", "cfo", "president", "chief"],
+    "vp_director": ["vp", "vice president", "director", "head"],
+    "manager": ["manager", "supervisor", "lead"],
+    "engineer": ["engineer", "engineering", "systems", "industrial", "automation", "controls"]
+}
+
+PAIN_LIBRARY = {
+    "ICP 1": {
+        "c_suite": [
+            {"theme": "reconfiguration", "statement": "Racking layouts tend to fall behind client mix shifts long before warehouse growth plans do."},
+            {"theme": "labor", "statement": "Labor balance usually tightens when new accounts and seasonal volume hit at the same time."}
+        ],
+        "vp_director": [
+            {"theme": "reconfiguration", "statement": "Pick paths and racking layouts often need re-slotting as SKU velocity changes."},
+            {"theme": "throughput", "statement": "Throughput ceilings usually show up at the handoff between storage and picking."}
+        ],
+        "manager": [
+            {"theme": "labor", "statement": "Labor coverage can get uneven when replenishment and picking compete for the same crews."},
+            {"theme": "reconfiguration", "statement": "Layout changes tend to lag client onboarding and create short-term congestion."}
+        ],
+        "engineer": [
+            {"theme": "reconfiguration", "statement": "Slotting and layout adjustments usually take more time than the client mix allows."},
+            {"theme": "integration", "statement": "Controls and WMS handoffs can become brittle once new storage zones are added."}
+        ]
+    },
+    "ICP 2": {
+        "c_suite": [
+            {"theme": "space", "statement": "Cold storage operations often hit density limits before automation plans are ready."},
+            {"theme": "throughput", "statement": "Throughput targets tend to collide with pallet access constraints in cold environments."}
+        ],
+        "vp_director": [
+            {"theme": "space", "statement": "Pallet density and access usually start competing as cold volumes expand."},
+            {"theme": "integration", "statement": "Automation readiness can be delayed by integration risk in temperature-controlled zones."}
+        ],
+        "manager": [
+            {"theme": "space", "statement": "Space utilization can tighten quickly when inbound and staging overlap in cold areas."},
+            {"theme": "labor", "statement": "Labor planning gets tough when travel time and staging keep shifting in cold storage."}
+        ],
+        "engineer": [
+            {"theme": "space", "statement": "High-density storage choices usually force tradeoffs between access time and pallet density."},
+            {"theme": "integration", "statement": "Controls integration tends to slow once cold zones add automation in phases."}
+        ]
+    },
+    "ICP 3": {
+        "c_suite": [
+            {"theme": "integration", "statement": "Material flow integration often becomes the pacing item as manufacturing expands."},
+            {"theme": "throughput", "statement": "Throughput bottlenecks usually shift from production to internal flow over time."}
+        ],
+        "vp_director": [
+            {"theme": "integration", "statement": "Material flow handoffs often create the longest tail as lines and storage expand."},
+            {"theme": "reconfiguration", "statement": "Mezzanine and flow changes usually lag expansion and create interim inefficiency."}
+        ],
+        "manager": [
+            {"theme": "throughput", "statement": "Internal flow tends to slow where storage and production exchange materials."},
+            {"theme": "reconfiguration", "statement": "Layout tweaks can become frequent once expansion adds parallel staging areas."}
+        ],
+        "engineer": [
+            {"theme": "integration", "statement": "Equipment integration points often become the limiting factor as lines scale."},
+            {"theme": "throughput", "statement": "Conveyance and staging handoffs usually set the practical throughput ceiling."}
+        ]
+    },
+    "ICP 4": {
+        "c_suite": [
+            {"theme": "throughput", "statement": "Throughput targets usually hit a ceiling before the network design does."},
+            {"theme": "integration", "statement": "Controls coordination often becomes the pacing item as sortation expands."}
+        ],
+        "vp_director": [
+            {"theme": "throughput", "statement": "Conveyor and sortation handoffs often cap throughput as volume peaks."},
+            {"theme": "integration", "statement": "Controls and WMS coordination tends to lag once sortation grows."}
+        ],
+        "manager": [
+            {"theme": "throughput", "statement": "Peak throughput often gets constrained by merge points and induction flow."},
+            {"theme": "labor", "statement": "Labor allocation can get tight when induction and outbound staffing swing daily."}
+        ],
+        "engineer": [
+            {"theme": "integration", "statement": "Controls timing between conveyor zones tends to be the first bottleneck."},
+            {"theme": "throughput", "statement": "Sortation merges usually set the upper bound on throughput."}
+        ]
+    },
+    "ICP 5": {
+        "c_suite": [
+            {"theme": "space", "statement": "High-density storage targets usually come before automation programs are stable."},
+            {"theme": "integration", "statement": "Automation integration risk often sets the pace for phased upgrades."}
+        ],
+        "vp_director": [
+            {"theme": "space", "statement": "Density and access tradeoffs tend to sharpen as volumes scale."},
+            {"theme": "integration", "statement": "Integration planning can slow down phased automation rollouts."}
+        ],
+        "manager": [
+            {"theme": "space", "statement": "Storage density can tighten quickly when inbound staging expands."},
+            {"theme": "labor", "statement": "Labor coverage tends to get uneven around automated and manual zones."}
+        ],
+        "engineer": [
+            {"theme": "integration", "statement": "Integration between automation and controls tends to surface first in phased rollouts."},
+            {"theme": "space", "statement": "Dense storage layouts usually trade off access time and retrieval sequence."}
+        ]
+    },
+    "DEFAULT": {
+        "unknown": [
+            {"theme": "throughput", "statement": "Throughput often tightens where storage and picking exchange materials."},
+            {"theme": "integration", "statement": "System handoffs can become the longest tail as operations scale."}
+        ]
+    }
+}
+
+PAIN_THEME_KEYWORDS = {
+    "throughput": ["throughput", "sortation", "merge", "induction", "shipping", "shipping dock", "case handling"],
+    "space": ["cold storage", "density", "deep-lane", "pallet shuttle", "asrs", "vlm", "space", "high-density"],
+    "labor": ["labor", "staffing", "shift", "training", "manual", "ergonomic"],
+    "reconfiguration": ["re-slot", "slotting", "layout", "mezzanine", "pick module", "racking"],
+    "integration": ["integration", "controls", "wms", "automation", "handoff", "interface"]
+}
+
+EQUIPMENT_ANCHOR_KEYWORDS = {
+    "conveyor": ["conveyor"],
+    "sortation": ["sortation", "sorter"],
+    "pallet_shuttle": ["pallet shuttle", "pallet shuttles"],
+    "racking": ["racking", "rack", "shelving"],
+    "mezzanine": ["mezzanine"],
+    "amr_agv": ["amr", "agv", "autonomous", "mobile robot"],
+    "asrs": ["asrs", "shuttle", "miniload"],
+    "vlm": ["vlm", "vertical lift"],
+    "wms": ["wms", "warehouse management"]
+}
+
+CTA_ACTIONS = {
+    "throughput": "sanity-check the flow",
+    "space": "compare layout options",
+    "labor": "pressure-test labor assumptions",
+    "reconfiguration": "map re-slotting options",
+    "integration": "walk through handoffs"
+}
 
 
 def extract_first_name(full_name: str) -> str:
@@ -30,6 +165,122 @@ def extract_first_name(full_name: str) -> str:
     # Take first word before space
     first_name = str(full_name).strip().split()[0]
     return first_name if first_name else "there"
+
+
+def normalize_text(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def classify_role_level(job_title: str) -> str:
+    title = normalize_text(job_title).lower()
+    if not title:
+        return "unknown"
+
+    for level, keywords in ROLE_LEVEL_KEYWORDS.items():
+        if any(keyword in title for keyword in keywords):
+            return level
+    return "unknown"
+
+
+def extract_equipment_anchors(equipment: str, notes: str) -> list[str]:
+    combined = f"{normalize_text(equipment)} {normalize_text(notes)}".lower()
+    anchors = []
+    for anchor, keywords in EQUIPMENT_ANCHOR_KEYWORDS.items():
+        if any(keyword in combined for keyword in keywords):
+            anchors.append(anchor)
+    return anchors
+
+
+def infer_pain_theme(icp_match: str, role_level: str, equipment: str, notes: str) -> str:
+    combined = f"{normalize_text(equipment)} {normalize_text(notes)}".lower()
+    for theme, keywords in PAIN_THEME_KEYWORDS.items():
+        if any(keyword in combined for keyword in keywords):
+            return theme
+
+    icp_entry = PAIN_LIBRARY.get(icp_match, {})
+    role_entry = icp_entry.get(role_level) or PAIN_LIBRARY.get("DEFAULT", {}).get("unknown", [])
+    if role_entry:
+        return role_entry[0]["theme"]
+    return "throughput"
+
+
+def select_pain_statement(icp_match: str, role_level: str, pain_theme: str) -> str:
+    role_entry = PAIN_LIBRARY.get(icp_match, {}).get(role_level, [])
+    if not role_entry:
+        role_entry = PAIN_LIBRARY.get("DEFAULT", {}).get("unknown", [])
+
+    for entry in role_entry:
+        if entry["theme"] == pain_theme:
+            return entry["statement"]
+
+    return role_entry[0]["statement"] if role_entry else "Throughput often tightens where storage and picking exchange materials."
+
+
+def compute_icp_confidence(icp_match: str, industry: str, role_level: str, equipment_anchors: list[str]) -> str:
+    score = 0
+    if icp_match in PAIN_LIBRARY:
+        score += 2
+    industry_clean = normalize_text(industry).lower()
+    if industry_clean and industry_clean not in ["other", "misc", "general"]:
+        score += 1
+    if role_level != "unknown":
+        score += 1
+    if equipment_anchors:
+        score += 1
+
+    if score >= 4:
+        return "high"
+    if score == 3:
+        return "medium"
+    return "low"
+
+
+def confidence_to_certainty(icp_confidence: str) -> str:
+    if icp_confidence == "high":
+        return "strong"
+    if icp_confidence == "medium":
+        return "moderate"
+    return "light"
+
+
+def build_credibility_anchor(equipment_category: str) -> str:
+    return f"We work on {equipment_category}."
+
+
+def build_cta_line(pain_theme: str, icp_confidence: str, followup: bool = False) -> tuple[str, str]:
+    action = CTA_ACTIONS.get(pain_theme, "sanity-check the flow")
+    label = action.replace("the ", "")
+
+    if icp_confidence == "high":
+        line = f"Can we {action} this week?" if followup else f"Can we {action} next week?"
+    elif icp_confidence == "medium":
+        line = f"I can {action} if that helps." if followup else f"If useful, I can {action}."
+    else:
+        line = f"If helpful, I can {action}."
+
+    return label, line
+
+
+def build_reinforcement_line(pain_theme: str, industry: str, icp_confidence: str) -> str:
+    industry_text = normalize_text(industry) or "operations"
+    if icp_confidence == "high":
+        adverb = "almost always"
+    elif icp_confidence == "medium":
+        adverb = "usually"
+    else:
+        adverb = "can"
+
+    lines = {
+        "throughput": f"In {industry_text} flow, the tight spot {adverb} sits between storage and picking.",
+        "space": f"In {industry_text} facilities, density and access {adverb} pull against each other.",
+        "labor": f"In {industry_text} ops, labor balance {adverb} tightens around picking and replenishment.",
+        "reconfiguration": f"In {industry_text} ops, layout changes {adverb} lag shifts in SKU mix.",
+        "integration": f"In {industry_text} ops, system handoffs {adverb} become the longest tail."
+    }
+
+    return lines.get(pain_theme, lines["throughput"])
 
 
 def get_equipment_offer(icp_match: str, equipment: str, notes: str) -> tuple[str, str]:
@@ -152,6 +403,45 @@ def fill_template(template: str, data: dict) -> str:
     return result
 
 
+def prepare_personalization_controls(df: pd.DataFrame) -> pd.DataFrame:
+    role_levels = []
+    icp_confidences = []
+    certainty_levels = []
+    pain_themes = []
+    pain_statements = []
+    equipment_anchors = []
+
+    for _, row in df.iterrows():
+        job_title = normalize_text(row.get("Job title", ""))
+        industry = normalize_text(row.get("Industry", ""))
+        icp_match = normalize_text(row.get("ICP Match", ""))
+        notes = normalize_text(row.get("Notes", ""))
+        equipment = normalize_text(row.get("Equipment", ""))
+
+        role_level = classify_role_level(job_title)
+        anchors = extract_equipment_anchors(equipment, notes)
+        pain_theme = infer_pain_theme(icp_match, role_level, equipment, notes)
+        pain_statement = select_pain_statement(icp_match, role_level, pain_theme)
+        icp_confidence = compute_icp_confidence(icp_match, industry, role_level, anchors)
+        certainty_level = confidence_to_certainty(icp_confidence)
+
+        role_levels.append(role_level)
+        icp_confidences.append(icp_confidence)
+        certainty_levels.append(certainty_level)
+        pain_themes.append(pain_theme)
+        pain_statements.append(pain_statement)
+        equipment_anchors.append(", ".join(anchors))
+
+    df["role_level"] = role_levels
+    df["icp_confidence"] = icp_confidences
+    df["certainty_level"] = certainty_levels
+    df["pain_theme"] = pain_themes
+    df["pain_statement"] = pain_statements
+    df["equipment_anchor"] = equipment_anchors
+
+    return df
+
+
 def generate_campaigns(input_path: str, output_path: str, limit: int = None, raise_on_error: bool = False):
     """
     Main function to generate personalized email campaigns
@@ -218,6 +508,9 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
 
     logger.info("✓ Required columns present")
 
+    # Prepare deterministic personalization controls
+    df = prepare_personalization_controls(df)
+
     # Generate personalization sentences
     logger.info("\n" + "=" * 60)
     logger.info("Generating personalization sentences...")
@@ -243,16 +536,18 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
         company_name = row["Company"]
         email_address = row["Email address"]
         full_name = row["Full name"]
-        job_title = row.get("Job title", "")
-        if pd.isna(job_title):
-            job_title = ""
-        job_title = str(job_title).strip()
+        job_title = normalize_text(row.get("Job title", ""))
         job_title_display = job_title if job_title else "operations leader"
-        industry = row.get("Industry", "")
-        icp_match = row.get("ICP Match", "")
-        icp_notes = row.get("Notes", "")
-        equipment = row.get("Equipment", "")
+        industry = normalize_text(row.get("Industry", ""))
+        icp_match = normalize_text(row.get("ICP Match", ""))
+        icp_notes = normalize_text(row.get("Notes", ""))
+        equipment = normalize_text(row.get("Equipment", ""))
         personalization = row["personalization_sentence"]
+        pain_theme = row.get("pain_theme", "throughput")
+        icp_confidence = row.get("icp_confidence", "low")
+        certainty_level = row.get("certainty_level", "light")
+        equipment_anchor_text = row.get("equipment_anchor", "")
+        equipment_anchor_list = [item.strip() for item in str(equipment_anchor_text).split(",") if item.strip()]
         first_name = extract_first_name(full_name)
 
         # Assign sender in round-robin fashion
@@ -264,6 +559,11 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
         # Get equipment offer based on ICP + equipment context
         equipment_category, software_mention = get_equipment_offer(icp_match, equipment, icp_notes)
 
+        credibility_anchor = build_credibility_anchor(equipment_category)
+        cta_label, cta_line = build_cta_line(pain_theme, icp_confidence, followup=False)
+        _, cta_line_followup = build_cta_line(pain_theme, icp_confidence, followup=True)
+        reinforcement_line = build_reinforcement_line(pain_theme, industry, icp_confidence)
+
         # Data for template filling
         template_data = {
             "first_name": first_name,
@@ -273,8 +573,24 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "job_title": job_title_display,
             "signature": sender["signature"],
             "equipment_category": equipment_category,
-            "software_mention": software_mention
+            "software_mention": software_mention,
+            "equipment_anchor": equipment_anchor_text,
+            "pain_theme": pain_theme,
+            "icp_confidence": icp_confidence,
+            "certainty_level": certainty_level,
+            "credibility_anchor": credibility_anchor,
+            "cta_line": cta_line,
+            "cta_line_followup": cta_line_followup,
+            "reinforcement_line": reinforcement_line
         }
+
+        personalization_object = {
+            "pain_theme": pain_theme,
+            "certainty_level": certainty_level,
+            "equipment_anchor": equipment_anchor_list,
+            "personalization_sentence": personalization
+        }
+        personalization_object_json = json.dumps(personalization_object, ensure_ascii=True)
 
         # Email 1 (use custom ICP subject instead of template subject)
         campaign_rows.append({
@@ -287,12 +603,22 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "subject": custom_subject,
             "body": fill_template(email_1_body, template_data),
             "personalization_sentence": personalization,
+            "personalization_object": personalization_object_json,
             "industry": industry,
             "icp_match": icp_match,
+            "role_level": row.get("role_level", "unknown"),
+            "icp_confidence": icp_confidence,
             "icp_notes": icp_notes,
+            "pain_statement": row.get("pain_statement", ""),
             "equipment": equipment,
+            "equipment_anchor": equipment_anchor_text,
             "equipment_category": equipment_category,
             "software_mention": software_mention,
+            "pain_theme": pain_theme,
+            "certainty_level": certainty_level,
+            "cta_label": cta_label,
+            "cta_line": cta_line,
+            "credibility_anchor": credibility_anchor,
             "sender_name": sender["full_name"],
             "sender_email": sender["email"],
             "sender_title": sender["title"]
@@ -309,12 +635,23 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "subject": f"Re: {custom_subject}",
             "body": fill_template(email_2_body, template_data),
             "personalization_sentence": personalization,
+            "personalization_object": personalization_object_json,
             "industry": industry,
             "icp_match": icp_match,
+            "role_level": row.get("role_level", "unknown"),
+            "icp_confidence": icp_confidence,
             "icp_notes": icp_notes,
+            "pain_statement": row.get("pain_statement", ""),
             "equipment": equipment,
+            "equipment_anchor": equipment_anchor_text,
             "equipment_category": equipment_category,
             "software_mention": software_mention,
+            "pain_theme": pain_theme,
+            "certainty_level": certainty_level,
+            "cta_label": cta_label,
+            "cta_line": cta_line_followup,
+            "credibility_anchor": credibility_anchor,
+            "reinforcement_line": reinforcement_line,
             "sender_name": sender["full_name"],
             "sender_email": sender["email"],
             "sender_title": sender["title"]

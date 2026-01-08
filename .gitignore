@@ -6,3 +6,6 @@ __pycache__/
 venv/
 *.log
 logs/
+dashboard/node_modules/
+dashboard/dist/
+data/uploads/

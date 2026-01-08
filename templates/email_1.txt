@@ -4,8 +4,8 @@ Hi {{first_name}},
 
 {{personalization_sentence}}
 
-We design and install {{equipment_category}}{{software_mention}}.
+{{credibility_anchor}}
 
-Would it make sense to have a quick conversation about how teams like yours are approaching this?
+{{cta_line}}
 
 {{signature}}

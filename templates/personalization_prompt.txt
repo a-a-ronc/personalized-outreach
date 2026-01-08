@@ -1,4 +1,4 @@
-You are generating one single personalization sentence for a B2B outreach email from a material handling systems integrator.
+﻿You are generating one single personalization sentence for a B2B outreach email from a material handling systems integrator.
 
 CONTEXT (AVAILABLE FIELDS)
 
@@ -9,15 +9,28 @@ ICP Notes: {{notes}}
 Relevant Equipment: {{equipment}}
 Company: {{company_name}}
 
+CONTROL OBJECT (DETERMINISTIC)
+
+Pain theme: {{pain_theme}}
+Approved pain statement: {{pain_statement}}
+Equipment anchors: {{equipment_anchor}}
+Certainty level: {{certainty_level}}
+
 REQUIREMENTS
 
-Generate ONE sentence only (18-25 words max)
-Sound like an engineer talking to another operator, not a marketer
-DO NOT say or imply you researched their company
-DO NOT make claims about their specific operation unless explicitly stated in ICP Notes
-Speak to general pain points common to their ICP segment AND role level
-Subtly anchor credibility by referencing equipment types, not selling them
-Keep tone conversational, technical, and grounded in reality
+- Generate ONE sentence only (18-25 words max).
+- Use the approved pain statement only; lightly rephrase it and do not add new pains.
+- Do not say or imply you researched their company.
+- Do not make claims about their specific operation unless explicitly stated in ICP Notes.
+- Do not include benefits, outcomes, or marketing verbs.
+- Do not list features or use colons or semicolons.
+- Use equipment anchors only if provided, and keep it subtle.
+- No adjectives unless they are technical.
+- Match certainty level:
+  - strong: usually
+  - moderate: often
+  - light: can
+- Keep tone like an operator talking to an operator.
 
 APPROVED SENTENCE STARTERS (USE ONLY THESE)
 
@@ -26,50 +39,13 @@ APPROVED SENTENCE STARTERS (USE ONLY THESE)
 "In growing {{industry}} environments..."
 "As {{industry}} operations scale..."
 
-GUIDANCE BY ICP (INTERNAL LOGIC - DO NOT STATE EXPLICITLY)
-
-ICP 1 (Utah 3PL / Fulfillment):
-Reconfiguration, labor pressure, client onboarding, racking/pick modules
-
-ICP 2 (Food / Cold Storage):
-Space constraints, pallet density, VLM, pallet shuttle, future automation readiness
-
-ICP 3 (Advanced Manufacturing):
-Expansion creep, material flow inefficiency, mezzanines and staged automation
-
-ICP 4 (National 3PL / Ecom):
-Throughput ceilings, conveyor/sortation complexity, controls coordination
-
-ICP 5 (National Cold / Auto / CPG):
-High-density storage, automation integration risk, phased upgrades
-
-GUIDANCE BY ROLE (INTERNAL LOGIC - DO NOT STATE EXPLICITLY)
-
-C-Suite (CEO, COO, CFO, President):
-Focus on strategic growth, operational efficiency, ROI, scalability
-
-VP/Director Level (VP Operations, Director of Logistics, etc.):
-Focus on throughput bottlenecks, process optimization, cross-functional coordination
-
-Manager Level (Warehouse Manager, Facilities Manager, Operations Manager):
-Focus on daily workflow efficiency, labor management, equipment reliability, space utilization
-
-Engineer/Specialist Level (Industrial Engineer, Systems Engineer):
-Focus on technical implementation, material flow analysis, equipment integration
-
 FORBIDDEN PHRASES (NEVER USE)
 
-❌ "I noticed..."
-❌ "I saw..."
-❌ "After researching..."
-❌ "Your operation likely..."
-❌ "You are probably dealing with..."
-
-GOOD EXAMPLES
-
-✓ "We often see 3PL operations reaching a point where racking layouts and picking methods limit how fast new clients can onboard."
-✓ "In growing cold chain environments, pallet density and accessibility start competing long before automation even enters the picture."
-✓ "As manufacturing operations scale, material flow between storage, assembly, and outbound often becomes harder to manage than production itself."
+"I noticed..."
+"I saw..."
+"After researching..."
+"Your operation likely..."
+"You are probably dealing with..."
 
 OUTPUT
 

@@ -2,10 +2,8 @@ Subject: Re: Quick thought on {{industry}} operations
 
 Hi {{first_name}},
 
-Following up with a bit more context for {{company_name}}.
+{{reinforcement_line}}
 
-Given your role as {{job_title}} in the {{industry}} space, I'd focus on {{equipment_category}} and the handoffs around it, since that's where throughput usually gets squeezed{{software_mention}}.
-
-If it helps, I can share a short example or sanity-check your current flow.
+{{cta_line_followup}}
 
 {{signature}}

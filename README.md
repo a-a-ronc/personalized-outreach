@@ -51,6 +51,30 @@ python webapp/app.py
 
 Then open `http://127.0.0.1:5000` in your browser. Upload a CSV, click Generate, and download the output from the page. Output files are saved to `output/`.
 
+### 3c. Campaign Studio (React + API)
+
+For a campaign dashboard with audience, content, emails, statistics, and settings:
+
+Backend (API):
+
+```bash
+python backend/app.py
+```
+
+Frontend (React):
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Then open the URL printed by Vite (default `http://127.0.0.1:5173`). If you change the API port, set:
+
+```bash
+set VITE_API_URL=http://127.0.0.1:7000
+```
+
 ### 4. Review Output Quality
 
 Open `output/campaigns.csv` and examine the `personalization_sentence` column.

@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import re
 from pathlib import Path
 from openai import OpenAI
 import pandas as pd
@@ -17,6 +18,67 @@ def load_prompt_template():
     with open(template_path, "r", encoding="utf-8") as f:
         return f.read()
 
+MARKETING_PHRASES = [
+    "improve",
+    "increase",
+    "boost",
+    "maximize",
+    "optimize",
+    "streamline",
+    "transform",
+    "revolutionize",
+    "unlock",
+    "drive",
+    "deliver",
+    "enhance"
+]
+
+BENEFIT_PHRASES = [
+    "so you can",
+    "so that you can",
+    "to help you",
+    "which allows",
+    "allowing you to",
+    "so your team can"
+]
+
+CLARIFICATION_PHRASES = [
+    "in other words",
+    "to be clear",
+    "that is to say",
+    "meaning that"
+]
+
+
+def sanitize_personalization(sentence: str) -> str:
+    cleaned = sentence.strip()
+
+    for separator in [":", ";"]:
+        if separator in cleaned:
+            cleaned = cleaned.split(separator)[0].strip()
+
+    if cleaned.count(",") >= 2:
+        cleaned = cleaned.split(",")[0].strip()
+
+    lower = cleaned.lower()
+    for phrase in BENEFIT_PHRASES:
+        idx = lower.find(phrase)
+        if idx != -1:
+            cleaned = cleaned[:idx].rstrip(" ,.-")
+            lower = cleaned.lower()
+
+    for phrase in CLARIFICATION_PHRASES:
+        cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
+
+    for phrase in MARKETING_PHRASES:
+        cleaned = re.sub(r"\b" + re.escape(phrase) + r"\b", "", cleaned, flags=re.IGNORECASE)
+
+    cleaned = " ".join(cleaned.split())
+    if cleaned and cleaned[-1] not in ".!?":
+        cleaned += "."
+
+    return cleaned
+
 
 def validate_personalization(sentence: str) -> tuple[bool, list[str]]:
     """
@@ -27,11 +89,11 @@ def validate_personalization(sentence: str) -> tuple[bool, list[str]]:
     """
     issues = []
 
-    # Check length (aim for 10-30 words)
+    # Check length (aim for 18-25 words)
     word_count = len(sentence.split())
-    if word_count < 10:
+    if word_count < 18:
         issues.append(f"Too short ({word_count} words)")
-    elif word_count > 30:
+    elif word_count > 25:
         issues.append(f"Too long ({word_count} words)")
 
     # Check for banned phrases
@@ -49,6 +111,16 @@ def validate_personalization(sentence: str) -> tuple[bool, list[str]]:
     for phrase in banned_phrases:
         if phrase in sentence_lower:
             issues.append(f"Contains banned phrase: '{phrase}'")
+
+    for phrase in MARKETING_PHRASES:
+        if re.search(r"\b" + re.escape(phrase) + r"\b", sentence_lower):
+            issues.append(f"Contains marketing verb: '{phrase}'")
+
+    if ":" in sentence or ";" in sentence:
+        issues.append("Contains feature list punctuation")
+
+    if sentence.count(",") >= 2:
+        issues.append("Contains list-like structure")
 
     is_valid = len(issues) == 0
     return is_valid, issues
@@ -68,6 +140,11 @@ def generate_personalization(company_data: dict, client: OpenAI, prompt_template
     notes = company_data.get("Notes", "")
     equipment = company_data.get("Equipment", "")
     job_title = company_data.get("Job title", "")
+    pain_theme = company_data.get("pain_theme", "")
+    pain_statement = company_data.get("pain_statement", "")
+    equipment_anchor = company_data.get("equipment_anchor", "")
+    certainty_level = company_data.get("certainty_level", "")
+    icp_confidence = company_data.get("icp_confidence", "")
 
     # Convert to strings and handle NaN values
     company_name = str(company_name) if pd.notna(company_name) else ""
@@ -76,6 +153,11 @@ def generate_personalization(company_data: dict, client: OpenAI, prompt_template
     notes = str(notes) if pd.notna(notes) else ""
     equipment = str(equipment) if pd.notna(equipment) else ""
     job_title = str(job_title) if pd.notna(job_title) else ""
+    pain_theme = str(pain_theme) if pd.notna(pain_theme) else ""
+    pain_statement = str(pain_statement) if pd.notna(pain_statement) else ""
+    equipment_anchor = str(equipment_anchor) if pd.notna(equipment_anchor) else ""
+    certainty_level = str(certainty_level) if pd.notna(certainty_level) else ""
+    icp_confidence = str(icp_confidence) if pd.notna(icp_confidence) else ""
 
     # Fill in the prompt template with new fields
     prompt = prompt_template.replace("{{company_name}}", company_name)
@@ -84,6 +166,11 @@ def generate_personalization(company_data: dict, client: OpenAI, prompt_template
     prompt = prompt.replace("{{notes}}", notes)
     prompt = prompt.replace("{{equipment}}", equipment)
     prompt = prompt.replace("{{job_title}}", job_title)
+    prompt = prompt.replace("{{pain_theme}}", pain_theme)
+    prompt = prompt.replace("{{pain_statement}}", pain_statement)
+    prompt = prompt.replace("{{equipment_anchor}}", equipment_anchor)
+    prompt = prompt.replace("{{certainty_level}}", certainty_level)
+    prompt = prompt.replace("{{icp_confidence}}", icp_confidence)
 
     # Attempt generation with retries
     for attempt in range(Config.MAX_RETRIES):
@@ -98,6 +185,9 @@ def generate_personalization(company_data: dict, client: OpenAI, prompt_template
             )
 
             sentence = response.choices[0].message.content.strip()
+            cleaned_sentence = sanitize_personalization(sentence)
+            if cleaned_sentence:
+                sentence = cleaned_sentence
 
             # Validate the generated sentence
             is_valid, issues = validate_personalization(sentence)
