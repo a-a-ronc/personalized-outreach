@@ -152,7 +152,7 @@ def fill_template(template: str, data: dict) -> str:
     return result
 
 
-def generate_campaigns(input_path: str, output_path: str, limit: int = None):
+def generate_campaigns(input_path: str, output_path: str, limit: int = None, raise_on_error: bool = False):
     """
     Main function to generate personalized email campaigns
 
@@ -160,6 +160,7 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None):
         input_path: Path to input CSV with leads
         output_path: Path to output CSV with campaigns
         limit: Optional limit on number of leads to process
+        raise_on_error: Raise exceptions instead of exiting (useful for web apps)
     """
     logger.info("=" * 60)
     logger.info("Personalized Outreach Campaign Generator")
@@ -172,6 +173,8 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None):
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
         logger.error("\nPlease create a .env file based on .env.example")
+        if raise_on_error:
+            raise ValueError(str(e))
         sys.exit(1)
 
     # Load input CSV
@@ -181,6 +184,8 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None):
         logger.info(f"✓ Loaded {len(df)} leads")
     except Exception as e:
         logger.error(f"Failed to load CSV: {e}")
+        if raise_on_error:
+            raise RuntimeError(f"Failed to load CSV: {e}")
         sys.exit(1)
 
     # Apply limit if specified
@@ -194,6 +199,8 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None):
     if missing:
         logger.error(f"Missing required columns: {', '.join(missing)}")
         logger.error(f"Available columns: {', '.join(df.columns)}")
+        if raise_on_error:
+            raise ValueError(f"Missing required columns: {', '.join(missing)}")
         sys.exit(1)
 
     # Ensure optional columns exist

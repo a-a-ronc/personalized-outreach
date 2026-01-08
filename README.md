@@ -41,6 +41,16 @@ This will:
 - Create 2 email variants per lead (Email 1 and Email 2)
 - Save results to `output/campaigns.csv`
 
+### 3b. Local Web App (Optional)
+
+If you want a simple UI for the team, run the local web app:
+
+```bash
+python webapp/app.py
+```
+
+Then open `http://127.0.0.1:5000` in your browser. Upload a CSV, click Generate, and download the output from the page. Output files are saved to `output/`.
+
 ### 4. Review Output Quality
 
 Open `output/campaigns.csv` and examine the `personalization_sentence` column.

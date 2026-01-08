@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Personalized Outreach Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="backdrop">
+      <div class="blob blob-1"></div>
+      <div class="blob blob-2"></div>
+      <div class="blob blob-3"></div>
+    </div>
+
+    <main class="page">
+      <header class="hero reveal">
+        <p class="eyebrow">Local Campaign Builder</p>
+        <h1>Personalized Outreach Generator</h1>
+        <p class="lead">
+          Upload a lead list, generate two-email sequences, and download a clean campaign CSV.
+          Built for teammates who want results without touching code.
+        </p>
+        <div class="hero-steps">
+          <div class="step">1. Upload CSV</div>
+          <div class="step">2. Generate</div>
+          <div class="step">3. Download</div>
+        </div>
+      </header>
+
+      <section class="card reveal delay-1">
+        <h2>Generate a Campaign</h2>
+
+        {% if error %}
+          <div class="alert error" role="alert">{{ error }}</div>
+        {% endif %}
+
+        {% if result %}
+          <div class="alert success" role="status">
+            <div class="alert-title">Campaign ready</div>
+            <div class="alert-meta">
+              <span>Output file: {{ result.output_name }}</span>
+              {% if result.summary.lead_count is not none %}
+                <span>Leads: {{ result.summary.lead_count }}</span>
+              {% endif %}
+              {% if result.summary.email_1_count is not none %}
+                <span>Email 1 rows: {{ result.summary.email_1_count }}</span>
+              {% endif %}
+              <span>Total rows: {{ result.summary.total_rows }}</span>
+            </div>
+            <a class="button" href="{{ result.download_url }}">Download CSV</a>
+          </div>
+        {% endif %}
+
+        <form class="form" method="post" enctype="multipart/form-data">
+          <div class="field">
+            <label for="csv-file">Lead CSV</label>
+            <div class="file-input">
+              <input id="csv-file" name="csv_file" type="file" accept=".csv" required />
+              <span class="file-name" id="file-name">No file selected</span>
+              <span class="file-button">Choose file</span>
+            </div>
+            <p class="helper">
+              Required columns: Company, Industry, Email address, Full name.
+              Optional: Notes, ICP Match, Equipment, Job title.
+            </p>
+          </div>
+
+          <div class="field-grid">
+            <div class="field">
+              <label for="output_filename">Output filename</label>
+              <input
+                id="output_filename"
+                name="output_filename"
+                type="text"
+                value="{{ default_output_name }}"
+              />
+            </div>
+
+            <div class="field">
+              <label for="limit">Lead limit (optional)</label>
+              <input id="limit" name="limit" type="number" min="1" placeholder="10" />
+            </div>
+          </div>
+
+          <button class="button primary" type="submit">Generate campaign</button>
+        </form>
+      </section>
+
+      <section class="card secondary reveal delay-2">
+        <h3>Before you run it</h3>
+        <ul class="checklist">
+          <li>Confirm your `.env` has a valid `OPENAI_API_KEY`.</li>
+          <li>Review the templates in `templates/` if tone changes are needed.</li>
+          <li>Start with a small limit to validate quality.</li>
+        </ul>
+      </section>
+
+      <footer class="footer reveal delay-3">
+        Runs locally on your machine. Output files are saved to `output/` and never uploaded anywhere else.
+      </footer>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
