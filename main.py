@@ -14,13 +14,106 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def extract_first_name(company_name: str) -> str:
+def extract_first_name(full_name: str) -> str:
     """
-    Extract first name from company name or return generic greeting
+    Extract first name from full name field
 
-    For now, returns generic "there" - can be enhanced later with contact data
+    Args:
+        full_name: Full name string (e.g., "John Smith")
+
+    Returns:
+        First name or "there" as fallback
     """
-    return "there"
+    if not full_name or pd.isna(full_name):
+        return "there"
+
+    # Take first word before space
+    first_name = str(full_name).strip().split()[0]
+    return first_name if first_name else "there"
+
+
+def get_equipment_offer(icp_match: str, equipment: str, notes: str) -> tuple[str, str]:
+    """
+    Dynamically select equipment offer based on lead context
+
+    Args:
+        icp_match: ICP segment (e.g., "ICP 1", "ICP 2", etc.)
+        equipment: Equipment description from dataset
+        notes: ICP notes with additional context
+
+    Returns:
+        (equipment_category, software_mention)
+    """
+    # Normalize inputs for matching
+    equipment_lower = str(equipment).lower()
+    notes_lower = str(notes).lower()
+    combined_context = f"{equipment_lower} {notes_lower}"
+
+    # Priority 1: High-Density Storage Systems
+    if any(keyword in equipment_lower for keyword in ["pallet shuttle", "push-back", "pallet flow", "deep-lane", "pushback"]):
+        equipment_category = "high-density storage systems - pallet shuttles, push-back rack, and deep-lane flow"
+        if icp_match in ["ICP 2", "ICP 5"]:
+            software_mention = " - and we built DensityPro to orchestrate the staging logic that most WMS systems miss"
+        else:
+            software_mention = ""
+        return (equipment_category, software_mention)
+
+    # Priority 2: Conveyor & Sortation
+    if any(keyword in equipment_lower for keyword in ["conveyor", "sortation", "case handling"]):
+        equipment_category = "case and pallet conveyor systems with integrated sortation"
+        if icp_match == "ICP 4" and "national" in combined_context:
+            software_mention = " - and partner with Lully to handle the WMS orchestration that makes throughput targets actually achievable"
+        else:
+            software_mention = ""
+        return (equipment_category, software_mention)
+
+    # Priority 3: Pick Module & Racking Systems
+    if any(keyword in equipment_lower for keyword in ["pick module", "pick", "racking", "shelving", "mezzanine"]):
+        equipment_category = "racking systems and pick modules"
+        if icp_match in ["ICP 1", "ICP 3"]:
+            software_mention = " - and we've built slotting software (Warehousr) to help you reconfigure layouts as demand changes"
+        else:
+            software_mention = ""
+        return (equipment_category, software_mention)
+
+    # Priority 4: AMR/AGV Automation
+    if any(keyword in equipment_lower for keyword in ["amr", "agv", "autonomous", "mobile robot"]):
+        equipment_category = "AMR and AGV systems for material flow automation"
+        software_mention = ""
+        return (equipment_category, software_mention)
+
+    # Fallback: General Material Handling
+    equipment_category = "material handling systems - from racking and conveyors to automation integration"
+    software_mention = ""
+    return (equipment_category, software_mention)
+
+
+def get_subject_line_by_icp(icp_match: str, industry: str) -> str:
+    """
+    Get ICP-specific subject line variant
+
+    Args:
+        icp_match: ICP segment (e.g., "ICP 1", "ICP 2", etc.)
+        industry: Industry classification
+
+    Returns:
+        Customized subject line
+    """
+    # Map ICP segments to specific subject lines
+    icp_subjects = {
+        "ICP 1": "Quick thought on pick module efficiency",
+        "ICP 2": "Quick thought on cold storage density",
+        "ICP 3": "Quick thought on material flow layout",
+        "ICP 4": "Quick thought on throughput scaling",
+        "ICP 5": "Quick thought on high-density automation"
+    }
+
+    # Return ICP-specific subject or default
+    if icp_match in icp_subjects:
+        return icp_subjects[icp_match]
+    else:
+        # Default fallback using industry
+        return f"Quick thought on {industry} operations"
 
 
 def load_email_template(template_name: str) -> tuple[str, str]:
@@ -95,18 +188,26 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None):
         df = df.head(limit)
         logger.info(f"✓ Limited to {limit} leads for testing")
 
-    # Validate required columns
-    required_columns = ["Company Name", "Industry", "Domain"]
+    # Validate required columns (new dataset format)
+    required_columns = ["Company", "Industry", "Email address", "Full name"]
     missing = [col for col in required_columns if col not in df.columns]
     if missing:
         logger.error(f"Missing required columns: {', '.join(missing)}")
         logger.error(f"Available columns: {', '.join(df.columns)}")
         sys.exit(1)
 
-    # Ensure Notes column exists
+    # Ensure optional columns exist
     if "Notes" not in df.columns:
         df["Notes"] = ""
-        logger.info("⚠ No 'Notes' column found - using empty strings for ICP notes")
+        logger.info("⚠ No 'Notes' column found - using empty strings")
+
+    if "ICP Match" not in df.columns:
+        df["ICP Match"] = ""
+        logger.info("⚠ No 'ICP Match' column found - using empty strings")
+
+    if "Equipment" not in df.columns:
+        df["Equipment"] = ""
+        logger.info("⚠ No 'Equipment' column found - using empty strings")
 
     logger.info("✓ Required columns present")
 
@@ -132,15 +233,25 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None):
     campaign_rows = []
 
     for idx, row in df.iterrows():
-        company_name = row["Company Name"]
-        domain = row["Domain"]
+        company_name = row["Company"]
+        email_address = row["Email address"]
+        full_name = row["Full name"]
+        job_title = row.get("Job title", "")
         industry = row.get("Industry", "")
+        icp_match = row.get("ICP Match", "")
         icp_notes = row.get("Notes", "")
+        equipment = row.get("Equipment", "")
         personalization = row["personalization_sentence"]
-        first_name = extract_first_name(company_name)
+        first_name = extract_first_name(full_name)
 
         # Assign sender in round-robin fashion
         sender = Config.get_sender_profile(idx)
+
+        # Get ICP-specific subject line
+        custom_subject = get_subject_line_by_icp(icp_match, industry)
+
+        # Get equipment offer based on ICP + equipment context
+        equipment_category, software_mention = get_equipment_offer(icp_match, equipment, icp_notes)
 
         # Data for template filling
         template_data = {
@@ -148,36 +259,50 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None):
             "industry": industry,
             "personalization_sentence": personalization,
             "company_name": company_name,
-            "signature": sender["signature"]
+            "signature": sender["signature"],
+            "equipment_category": equipment_category,
+            "software_mention": software_mention
         }
 
-        # Email 1
+        # Email 1 (use custom ICP subject instead of template subject)
         campaign_rows.append({
+            "recipient_name": full_name,
+            "recipient_email": email_address,
+            "recipient_job_title": job_title,
             "company_name": company_name,
-            "domain": domain,
             "first_name": first_name,
             "email_sequence": 1,
-            "subject": fill_template(email_1_subject, template_data),
+            "subject": custom_subject,
             "body": fill_template(email_1_body, template_data),
             "personalization_sentence": personalization,
             "industry": industry,
+            "icp_match": icp_match,
             "icp_notes": icp_notes,
+            "equipment": equipment,
+            "equipment_category": equipment_category,
+            "software_mention": software_mention,
             "sender_name": sender["full_name"],
             "sender_email": sender["email"],
             "sender_title": sender["title"]
         })
 
-        # Email 2 (reuses same personalization and sender)
+        # Email 2 (reuses same personalization, sender, and subject)
         campaign_rows.append({
+            "recipient_name": full_name,
+            "recipient_email": email_address,
+            "recipient_job_title": job_title,
             "company_name": company_name,
-            "domain": domain,
             "first_name": first_name,
             "email_sequence": 2,
-            "subject": fill_template(email_2_subject, template_data),
+            "subject": f"Re: {custom_subject}",
             "body": fill_template(email_2_body, template_data),
             "personalization_sentence": personalization,
             "industry": industry,
+            "icp_match": icp_match,
             "icp_notes": icp_notes,
+            "equipment": equipment,
+            "equipment_category": equipment_category,
+            "software_mention": software_mention,
             "sender_name": sender["full_name"],
             "sender_email": sender["email"],
             "sender_title": sender["title"]

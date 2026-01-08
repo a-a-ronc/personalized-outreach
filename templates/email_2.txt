@@ -2,7 +2,7 @@ Subject: Re: Quick thought on {{industry}} operations
 
 Hi {{first_name}},
 
-Following up on my note from last week about [BRIEF CALLBACK TO PROBLEM].
+Following up on my note from last week about how this tends to become a bottleneck as operations scale.
 
 {{personalization_sentence}}
 

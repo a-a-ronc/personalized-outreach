@@ -8,7 +8,10 @@
       "Bash(cat:*)",
       "Bash(mkdir:*)",
       "Bash(C:UsersAaronCendejasAppDataLocalProgramsPythonPython312python.exe main.py --input data/aviation_medical_equipment_with_icp_full.csv --output output/campaigns.csv --limit 10)",
-      "Bash(py main.py:*)"
+      "Bash(py main.py:*)",
+      "Bash(py:*)",
+      "Bash(gh repo view:*)",
+      "Bash(python main.py:*)"
     ]
   }
 }

@@ -4,7 +4,7 @@ Hi {{first_name}},
 
 {{personalization_sentence}}
 
-We built [YOUR PRODUCT NAME] specifically for teams dealing with this. It's designed to [BRIEF VALUE PROP - 1 sentence].
+We design and install {{equipment_category}}{{software_mention}}.
 
 Would it make sense to have a quick conversation about how teams like yours are approaching this?
 

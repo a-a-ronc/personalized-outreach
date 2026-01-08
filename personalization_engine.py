@@ -61,15 +61,29 @@ def generate_personalization(company_data: dict, client: OpenAI, prompt_template
     Returns:
         (generated_sentence, success_flag)
     """
-    # Extract data
-    company_name = company_data.get("Company Name", "")
+    # Extract data from new dataset format
+    company_name = company_data.get("Company", company_data.get("Company Name", ""))
     industry = company_data.get("Industry", "")
-    icp_notes = company_data.get("Notes", "")
+    icp_match = company_data.get("ICP Match", "")
+    notes = company_data.get("Notes", "")
+    equipment = company_data.get("Equipment", "")
+    job_title = company_data.get("Job title", "")
 
-    # Fill in the prompt template
+    # Convert to strings and handle NaN values
+    company_name = str(company_name) if pd.notna(company_name) else ""
+    industry = str(industry) if pd.notna(industry) else ""
+    icp_match = str(icp_match) if pd.notna(icp_match) else ""
+    notes = str(notes) if pd.notna(notes) else ""
+    equipment = str(equipment) if pd.notna(equipment) else ""
+    job_title = str(job_title) if pd.notna(job_title) else ""
+
+    # Fill in the prompt template with new fields
     prompt = prompt_template.replace("{{company_name}}", company_name)
     prompt = prompt.replace("{{industry}}", industry)
-    prompt = prompt.replace("{{icp_notes}}", icp_notes)
+    prompt = prompt.replace("{{icp_match}}", icp_match)
+    prompt = prompt.replace("{{notes}}", notes)
+    prompt = prompt.replace("{{equipment}}", equipment)
+    prompt = prompt.replace("{{job_title}}", job_title)
 
     # Attempt generation with retries
     for attempt in range(Config.MAX_RETRIES):

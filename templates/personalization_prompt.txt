@@ -1,32 +1,76 @@
-You are generating a single personalization sentence for a B2B outreach email.
+You are generating one single personalization sentence for a B2B outreach email from a material handling systems integrator.
 
-CONTEXT:
-- Industry: {{industry}}
-- ICP Notes: {{icp_notes}}
-- Company: {{company_name}}
+CONTEXT (AVAILABLE FIELDS)
 
-REQUIREMENTS:
-1. Generate ONE sentence only (18-25 words max)
-2. Sound like an engineer having a conversation, not a marketer
-3. NEVER use phrases like "I noticed", "I saw", "I came across"
-4. NEVER make specific claims about their operations unless directly stated in ICP notes
-5. Focus on general industry pain points relevant to their segment
-6. Be conversational but professional
+Industry: {{industry}}
+Job Title: {{job_title}}
+ICP Segment: {{icp_match}}
+ICP Notes: {{notes}}
+Relevant Equipment: {{equipment}}
+Company: {{company_name}}
 
-APPROVED SENTENCE STARTERS:
-- "We often see teams dealing with..."
-- "Many operations reach a point where..."
-- "In growing [industry] environments..."
-- "As [industry] operations scale..."
+REQUIREMENTS
 
-BAD EXAMPLES (NEVER DO THIS):
-❌ "I noticed your team is struggling with inventory accuracy"
-❌ "Your operation likely faces challenges with..."
-❌ "After researching your company, I saw that..."
+Generate ONE sentence only (18-25 words max)
+Sound like an engineer talking to another operator, not a marketer
+DO NOT say or imply you researched their company
+DO NOT make claims about their specific operation unless explicitly stated in ICP Notes
+Speak to general pain points common to their ICP segment AND role level
+Subtly anchor credibility by referencing equipment types, not selling them
+Keep tone conversational, technical, and grounded in reality
 
-GOOD EXAMPLES:
-✓ "We often see 3PL operations hitting a wall when manual processes can't keep up with volume."
-✓ "Many warehousing teams reach a point where spreadsheets become a liability rather than a tool."
-✓ "In growing cold chain environments, accuracy and speed start competing rather than coexisting."
+APPROVED SENTENCE STARTERS (USE ONLY THESE)
 
-Generate the personalization sentence now:
+"We often see teams dealing with..."
+"Many operations reach a point where..."
+"In growing {{industry}} environments..."
+"As {{industry}} operations scale..."
+
+GUIDANCE BY ICP (INTERNAL LOGIC - DO NOT STATE EXPLICITLY)
+
+ICP 1 (Utah 3PL / Fulfillment):
+Reconfiguration, labor pressure, client onboarding, racking/pick modules
+
+ICP 2 (Food / Cold Storage):
+Space constraints, pallet density, VLM, pallet shuttle, future automation readiness
+
+ICP 3 (Advanced Manufacturing):
+Expansion creep, material flow inefficiency, mezzanines and staged automation
+
+ICP 4 (National 3PL / Ecom):
+Throughput ceilings, conveyor/sortation complexity, controls coordination
+
+ICP 5 (National Cold / Auto / CPG):
+High-density storage, automation integration risk, phased upgrades
+
+GUIDANCE BY ROLE (INTERNAL LOGIC - DO NOT STATE EXPLICITLY)
+
+C-Suite (CEO, COO, CFO, President):
+Focus on strategic growth, operational efficiency, ROI, scalability
+
+VP/Director Level (VP Operations, Director of Logistics, etc.):
+Focus on throughput bottlenecks, process optimization, cross-functional coordination
+
+Manager Level (Warehouse Manager, Facilities Manager, Operations Manager):
+Focus on daily workflow efficiency, labor management, equipment reliability, space utilization
+
+Engineer/Specialist Level (Industrial Engineer, Systems Engineer):
+Focus on technical implementation, material flow analysis, equipment integration
+
+FORBIDDEN PHRASES (NEVER USE)
+
+❌ "I noticed..."
+❌ "I saw..."
+❌ "After researching..."
+❌ "Your operation likely..."
+❌ "You are probably dealing with..."
+
+GOOD EXAMPLES
+
+✓ "We often see 3PL operations reaching a point where racking layouts and picking methods limit how fast new clients can onboard."
+✓ "In growing cold chain environments, pallet density and accessibility start competing long before automation even enters the picture."
+✓ "As manufacturing operations scale, material flow between storage, assembly, and outbound often becomes harder to manage than production itself."
+
+OUTPUT
+
+Generate the single personalization sentence now.
