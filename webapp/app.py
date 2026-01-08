@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import socket
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -59,6 +61,30 @@ def build_summary(output_path: Path) -> dict:
         summary["email_1_count"] = int((df["email_sequence"] == 1).sum())
 
     return summary
+
+
+def is_port_available(port: int, host: str = "127.0.0.1") -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def choose_port() -> int:
+    env_port = os.getenv("PORT")
+    if env_port and env_port.isdigit():
+        env_value = int(env_port)
+        if is_port_available(env_value):
+            return env_value
+
+    for candidate in (5000, 5001, 5002, 5050, 5100, 8000):
+        if is_port_available(candidate):
+            return candidate
+
+    return 0
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -131,4 +157,13 @@ def download(filename: str):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000)
+    host = "127.0.0.1"
+    port = choose_port()
+    try:
+        app.run(host=host, port=port)
+    except OSError as exc:
+        if port != 0:
+            port = 0
+            app.run(host=host, port=port)
+        else:
+            raise exc

@@ -244,6 +244,10 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
         email_address = row["Email address"]
         full_name = row["Full name"]
         job_title = row.get("Job title", "")
+        if pd.isna(job_title):
+            job_title = ""
+        job_title = str(job_title).strip()
+        job_title_display = job_title if job_title else "operations leader"
         industry = row.get("Industry", "")
         icp_match = row.get("ICP Match", "")
         icp_notes = row.get("Notes", "")
@@ -266,6 +270,7 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "industry": industry,
             "personalization_sentence": personalization,
             "company_name": company_name,
+            "job_title": job_title_display,
             "signature": sender["signature"],
             "equipment_category": equipment_category,
             "software_mention": software_mention
