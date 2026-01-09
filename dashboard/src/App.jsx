@@ -30,6 +30,22 @@ function App() {
   const [audience, setAudience] = useState({ rows: [], total: 0 });
   const [emails, setEmails] = useState({ rows: [], total: 0 });
   const [stats, setStats] = useState(null);
+  const [metrics, setMetrics] = useState(null);
+  const [eventRows, setEventRows] = useState([]);
+  const [eventFilter, setEventFilter] = useState({
+    eventType: "email_sent",
+    dimension: "",
+    value: ""
+  });
+  const [simulationDraft, setSimulationDraft] = useState({
+    count: 50,
+    openRate: 28,
+    replyRate: 4,
+    bounceRate: 1,
+    unsubscribeRate: 0.5,
+    clickRate: 2,
+    positiveRate: 45
+  });
   const [senders, setSenders] = useState([]);
   const [contentDraft, setContentDraft] = useState(null);
   const [settingsDraft, setSettingsDraft] = useState(null);
@@ -56,6 +72,7 @@ function App() {
         if (data.length > 0) {
           setActiveId(data[0].id);
         }
+        setErrorMessage("");
       })
       .catch((error) => setErrorMessage(error.message));
   }, [normalizedApiBase]);
@@ -76,78 +93,108 @@ function App() {
         setContentDraft(data.sequence);
         setSettingsDraft(data.settings);
         setStats(data.stats);
+        setErrorMessage("");
       })
       .catch((error) => setErrorMessage(error.message));
   }, [activeId]);
 
-  const deliveryBase = stats?.delivered || stats?.sent || 0;
-  const scheduledBase = stats?.scheduled || 0;
+  const funnel = metrics?.funnel || stats || {};
+  const deliveryBase = funnel?.delivered || funnel?.sent || 0;
+  const scheduledBase = funnel?.scheduled || 0;
 
   const ringData = [
     {
       label: "Sent",
-      value: stats?.sent || 0,
-      percent: scheduledBase ? (stats?.sent || 0) / scheduledBase * 100 : 0,
+      value: funnel?.sent || 0,
+      percent: scheduledBase ? (funnel?.sent || 0) / scheduledBase * 100 : 0,
       color: "#1e7dd7",
       sublabel: scheduledBase ? `of ${formatNumber(scheduledBase)}` : "scheduled"
     },
     {
       label: "Opened",
-      value: stats?.opened || 0,
-      percent: deliveryBase ? (stats?.opened || 0) / deliveryBase * 100 : 0,
+      value: funnel?.opened || 0,
+      percent: deliveryBase ? (funnel?.opened || 0) / deliveryBase * 100 : 0,
       color: "#1fa85a",
-      sublabel: deliveryBase ? `${formatNumber(stats?.opened || 0)}` : "0"
+      sublabel: deliveryBase ? `${formatNumber(funnel?.opened || 0)}` : "0"
     },
     {
       label: "Replied",
-      value: stats?.replied || 0,
-      percent: deliveryBase ? (stats?.replied || 0) / deliveryBase * 100 : 0,
+      value: funnel?.replied || 0,
+      percent: deliveryBase ? (funnel?.replied || 0) / deliveryBase * 100 : 0,
       color: "#7d4df6",
-      sublabel: deliveryBase ? `${formatNumber(stats?.replied || 0)}` : "0"
+      sublabel: deliveryBase ? `${formatNumber(funnel?.replied || 0)}` : "0"
     },
     {
       label: "Successful",
-      value: stats?.successful || 0,
-      percent: deliveryBase ? (stats?.successful || 0) / deliveryBase * 100 : 0,
+      value: funnel?.successful || 0,
+      percent: deliveryBase ? (funnel?.successful || 0) / deliveryBase * 100 : 0,
       color: "#18a780",
-      sublabel: deliveryBase ? `${formatNumber(stats?.successful || 0)}` : "0"
+      sublabel: deliveryBase ? `${formatNumber(funnel?.successful || 0)}` : "0"
     },
     {
       label: "Bounced",
-      value: stats?.bounced || 0,
-      percent: stats?.sent ? (stats?.bounced || 0) / stats.sent * 100 : 0,
+      value: funnel?.bounced || 0,
+      percent: funnel?.sent ? (funnel?.bounced || 0) / funnel.sent * 100 : 0,
       color: "#e08a2f",
-      sublabel: stats?.sent ? `${formatNumber(stats?.bounced || 0)}` : "0"
+      sublabel: funnel?.sent ? `${formatNumber(funnel?.bounced || 0)}` : "0"
     },
     {
       label: "Unsubscribed",
-      value: stats?.unsubscribed || 0,
-      percent: deliveryBase ? (stats?.unsubscribed || 0) / deliveryBase * 100 : 0,
+      value: funnel?.unsubscribed || 0,
+      percent: deliveryBase ? (funnel?.unsubscribed || 0) / deliveryBase * 100 : 0,
       color: "#d14a4a",
-      sublabel: deliveryBase ? `${formatNumber(stats?.unsubscribed || 0)}` : "0"
+      sublabel: deliveryBase ? `${formatNumber(funnel?.unsubscribed || 0)}` : "0"
     }
   ];
+  const ringEventMap = {
+    Sent: "email_sent",
+    Opened: "email_opened",
+    Replied: "email_replied",
+    Successful: "reply_classified",
+    Bounced: "email_bounced",
+    Unsubscribed: "email_unsubscribed"
+  };
 
   useEffect(() => {
     if (!activeId) return;
     if (activeTab === "Audience") {
       fetchApi(`/api/campaigns/${activeId}/audience?limit=200`)
-        .then(setAudience)
+        .then((data) => {
+          setAudience(data);
+          setErrorMessage("");
+        })
         .catch((error) => setErrorMessage(error.message));
     }
     if (activeTab === "Emails") {
       fetchApi(`/api/campaigns/${activeId}/emails?limit=200`)
-        .then(setEmails)
+        .then((data) => {
+          setEmails(data);
+          setErrorMessage("");
+        })
         .catch((error) => setErrorMessage(error.message));
     }
     if (activeTab === "Statistics") {
-      fetchApi(`/api/campaigns/${activeId}/stats`)
-        .then(setStats)
+      fetchApi(`/api/metrics?campaign_id=${activeId}`)
+        .then((data) => {
+          setMetrics(data);
+          setErrorMessage("");
+        })
+        .catch((error) => setErrorMessage(error.message));
+      fetchApi(
+        `/api/events?campaign_id=${activeId}&event_type=${eventFilter.eventType}&limit=200`
+      )
+        .then((data) => {
+          setEventRows(data.events || []);
+          setErrorMessage("");
+        })
         .catch((error) => setErrorMessage(error.message));
     }
     if (activeTab === "Settings") {
       fetchApi("/api/senders")
-        .then(setSenders)
+        .then((data) => {
+          setSenders(data);
+          setErrorMessage("");
+        })
         .catch((error) => setErrorMessage(error.message));
     }
   }, [activeId, activeTab]);
@@ -156,6 +203,25 @@ function App() {
     const active = campaigns.find((item) => item.id === activeId);
     return active ? active.name : "Campaign";
   }, [campaigns, activeId]);
+
+  useEffect(() => {
+    if (!activeId || activeTab !== "Statistics") return;
+    const params = new URLSearchParams({
+      campaign_id: activeId,
+      event_type: eventFilter.eventType,
+      limit: "200"
+    });
+    if (eventFilter.dimension && eventFilter.value) {
+      params.set("dimension", eventFilter.dimension);
+      params.set("value", eventFilter.value);
+    }
+    fetchApi(`/api/events?${params.toString()}`)
+      .then((data) => {
+        setEventRows(data.events || []);
+        setErrorMessage("");
+      })
+      .catch((error) => setErrorMessage(error.message));
+  }, [activeId, activeTab, eventFilter]);
 
   function updateContentDraft(emailKey, field, value) {
     setContentDraft((prev) => {
@@ -292,6 +358,58 @@ function App() {
       });
   }
 
+  function handleSimulateEvents() {
+    if (!activeId) {
+      setErrorMessage("Select a campaign first.");
+      return;
+    }
+    if (!campaign?.output_file) {
+      setErrorMessage("Generate output before simulating events.");
+      return;
+    }
+    setErrorMessage("");
+    setStatusMessage("Simulating events...");
+    const countValue = Number(simulationDraft.count || 0) || 50;
+    const payload = {
+      campaign_id: activeId,
+      count: countValue,
+      open_rate: Number(simulationDraft.openRate || 0) / 100,
+      reply_rate: Number(simulationDraft.replyRate || 0) / 100,
+      bounce_rate: Number(simulationDraft.bounceRate || 0) / 100,
+      unsubscribe_rate: Number(simulationDraft.unsubscribeRate || 0) / 100,
+      click_rate: Number(simulationDraft.clickRate || 0) / 100,
+      positive_rate: Number(simulationDraft.positiveRate || 0) / 100
+    };
+
+    fetchApi("/api/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then(() => fetchApi(`/api/metrics?campaign_id=${activeId}`))
+      .then((data) => {
+        setMetrics(data);
+        const params = new URLSearchParams({
+          campaign_id: activeId,
+          event_type: eventFilter.eventType,
+          limit: "200"
+        });
+        if (eventFilter.dimension && eventFilter.value) {
+          params.set("dimension", eventFilter.dimension);
+          params.set("value", eventFilter.value);
+        }
+        return fetchApi(`/api/events?${params.toString()}`);
+      })
+      .then((data) => {
+        setEventRows(data.events || []);
+        setStatusMessage("Simulation complete.");
+      })
+      .catch((error) => {
+        setStatusMessage("");
+        setErrorMessage(error.message);
+      });
+  }
+
 
   function toggleSender(email) {
     setSettingsDraft((prev) => {
@@ -400,11 +518,11 @@ function App() {
             </div>
             <div className="status-stat">
               <span>Scheduled</span>
-              <strong>{formatNumber(campaign?.stats?.scheduled || 0)}</strong>
+              <strong>{formatNumber(funnel?.scheduled || 0)}</strong>
             </div>
             <div className="status-stat">
               <span>Sent</span>
-              <strong>{formatNumber(campaign?.stats?.sent || 0)}</strong>
+              <strong>{formatNumber(funnel?.sent || 0)}</strong>
             </div>
           </div>
         </header>
@@ -619,20 +737,31 @@ function App() {
                 <div className="stats-summary">
                   <div>
                     <p>Scheduled</p>
-                    <strong>{formatNumber(stats?.scheduled || 0)}</strong>
+                    <strong>{formatNumber(funnel?.scheduled || 0)}</strong>
                   </div>
                   <div>
                     <p>Sent</p>
-                    <strong>{formatNumber(stats?.sent || 0)}</strong>
+                    <strong>{formatNumber(funnel?.sent || 0)}</strong>
                   </div>
                   <div>
                     <p>Delivered</p>
-                    <strong>{formatNumber(stats?.delivered || 0)}</strong>
+                    <strong>{formatNumber(funnel?.delivered || 0)}</strong>
                   </div>
                 </div>
                 <div className="ring-grid">
                   {ringData.map((item) => (
-                    <div className="ring-card" key={item.label}>
+                    <button
+                      className="ring-card"
+                      key={item.label}
+                      onClick={() =>
+                        setEventFilter({
+                          eventType: ringEventMap[item.label],
+                          dimension: "",
+                          value: ""
+                        })
+                      }
+                      type="button"
+                    >
                       <div
                         className="ring"
                         style={{
@@ -649,6 +778,315 @@ function App() {
                         </div>
                       </div>
                       <span className="ring-label">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Simulate events</h2>
+                  <span>Populate analytics fast</span>
+                </div>
+                <div className="simulate-grid">
+                  <label>
+                    Sample size
+                    <input
+                      type="number"
+                      min="1"
+                      value={simulationDraft.count}
+                      onChange={(event) =>
+                        setSimulationDraft((prev) => ({
+                          ...prev,
+                          count: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Open rate %
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={simulationDraft.openRate}
+                      onChange={(event) =>
+                        setSimulationDraft((prev) => ({
+                          ...prev,
+                          openRate: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Reply rate %
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={simulationDraft.replyRate}
+                      onChange={(event) =>
+                        setSimulationDraft((prev) => ({
+                          ...prev,
+                          replyRate: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Positive reply %
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={simulationDraft.positiveRate}
+                      onChange={(event) =>
+                        setSimulationDraft((prev) => ({
+                          ...prev,
+                          positiveRate: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Bounce rate %
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={simulationDraft.bounceRate}
+                      onChange={(event) =>
+                        setSimulationDraft((prev) => ({
+                          ...prev,
+                          bounceRate: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Unsubscribe %
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={simulationDraft.unsubscribeRate}
+                      onChange={(event) =>
+                        setSimulationDraft((prev) => ({
+                          ...prev,
+                          unsubscribeRate: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Click rate %
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={simulationDraft.clickRate}
+                      onChange={(event) =>
+                        setSimulationDraft((prev) => ({
+                          ...prev,
+                          clickRate: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <button className="primary-button" onClick={handleSimulateEvents}>
+                  Run simulation
+                </button>
+                <p className="muted">
+                  Uses the generated output file to create deterministic sample events.
+                </p>
+              </div>
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Breakdowns</h2>
+                  <span>Click any row to drill into events</span>
+                </div>
+                <div className="breakdown-grid">
+                  {[
+                    { label: "By sender", key: "sender" },
+                    { label: "By ICP", key: "icp" },
+                    { label: "By pain theme", key: "pain_theme" },
+                    { label: "By CTA variant", key: "cta_variant" },
+                    { label: "By subject variant", key: "subject_variant" }
+                  ].map((section) => (
+                    <div className="breakdown-card" key={section.key}>
+                      <h4>{section.label}</h4>
+                      <div className="breakdown-table">
+                        {(metrics?.breakdowns?.[section.key] || []).slice(0, 6).map((row) => (
+                          <button
+                            key={`${section.key}-${row.key}`}
+                            className="breakdown-row"
+                            onClick={() =>
+                              setEventFilter({
+                                eventType: "email_sent",
+                                dimension:
+                                  section.key === "sender"
+                                    ? "sender_email"
+                                    : section.key === "icp"
+                                      ? "icp_segment"
+                                      : section.key === "pain_theme"
+                                        ? "pain_theme"
+                                        : section.key === "cta_variant"
+                                          ? "cta_variant_id"
+                                          : "subject_variant_id",
+                                value: row.key
+                              })
+                            }
+                            type="button"
+                          >
+                            <span>{row.key}</span>
+                            <span>{formatNumber(row.sent || 0)} sent</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Reply mix</h2>
+                  <span>Classification distribution</span>
+                </div>
+                <div className="reply-grid">
+                  {(metrics?.reply_classes || []).map((item) => (
+                    <div className="reply-pill" key={item.class}>
+                      <span>{item.class}</span>
+                      <strong>{formatNumber(item.count)}</strong>
+                    </div>
+                  ))}
+                  {(!metrics?.reply_classes || metrics.reply_classes.length === 0) && (
+                    <p className="muted">No replies classified yet.</p>
+                  )}
+                </div>
+                <div className="quality-row">
+                  <div>
+                    <p>Avg sentiment</p>
+                    <strong>{(metrics?.quality?.avg_sentiment || 0).toFixed(2)}</strong>
+                  </div>
+                  <div>
+                    <p>Avg intent</p>
+                    <strong>{(metrics?.quality?.avg_intent || 0).toFixed(2)}</strong>
+                  </div>
+                  <div>
+                    <p>Avg response (hrs)</p>
+                    <strong>{(metrics?.quality?.avg_latency_hours || 0).toFixed(1)}</strong>
+                  </div>
+                </div>
+              </div>
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Send timing</h2>
+                  <span>Based on sent events</span>
+                </div>
+                <div className="timing-grid">
+                  <div>
+                    <h4>Day of week</h4>
+                    <div className="timing-table">
+                      {(metrics?.time?.by_day || []).map((row) => (
+                        <button
+                          key={row.day}
+                          className="timing-row"
+                          type="button"
+                          onClick={() =>
+                            setEventFilter({
+                              eventType: "email_sent",
+                              dimension: "day",
+                              value: row.day
+                            })
+                          }
+                        >
+                          <span>{row.day}</span>
+                          <span>{formatNumber(row.sent)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h4>Hour</h4>
+                    <div className="timing-table">
+                      {(metrics?.time?.by_hour || []).map((row) => (
+                        <button
+                          key={row.hour}
+                          className="timing-row"
+                          type="button"
+                          onClick={() =>
+                            setEventFilter({
+                              eventType: "email_sent",
+                              dimension: "hour",
+                              value: row.hour
+                            })
+                          }
+                        >
+                          <span>{row.hour}</span>
+                          <span>{formatNumber(row.sent)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Event explorer</h2>
+                  <span>
+                    {eventFilter.eventType.replaceAll("_", " ")} - {formatNumber(eventRows.length)} rows
+                  </span>
+                </div>
+                <div className="event-filters">
+                  <select
+                    value={eventFilter.eventType}
+                    onChange={(event) =>
+                      setEventFilter((prev) => ({ ...prev, eventType: event.target.value }))
+                    }
+                  >
+                    {[
+                      "email_sent",
+                      "email_delivered",
+                      "email_opened",
+                      "email_replied",
+                      "reply_classified",
+                      "email_bounced",
+                      "email_unsubscribed"
+                    ].map((type) => (
+                      <option value={type} key={type}>
+                        {type.replace("_", " ")}
+                      </option>
+                    ))}
+                  </select>
+                  {eventFilter.dimension && (
+                    <button
+                      className="clear-filter"
+                      type="button"
+                      onClick={() => setEventFilter((prev) => ({ ...prev, dimension: "", value: "" }))}
+                    >
+                      Clear filter
+                    </button>
+                  )}
+                </div>
+                <div className="event-table">
+                  <div className="event-row event-head">
+                    <span>Timestamp</span>
+                    <span>Recipient</span>
+                    <span>Sender</span>
+                    <span>Sequence</span>
+                    <span>Pain</span>
+                    <span>CTA</span>
+                    <span>Subject</span>
+                  </div>
+                  {eventRows.map((row) => (
+                    <div className="event-row" key={row.event_id}>
+                      <span>{row.timestamp}</span>
+                      <span>{row.recipient_email}</span>
+                      <span>{row.sender_email}</span>
+                      <span>{row.email_sequence}</span>
+                      <span>{row.pain_theme || "-"}</span>
+                      <span>{row.cta_variant_id || "-"}</span>
+                      <span>{row.subject_variant_id || "-"}</span>
                     </div>
                   ))}
                 </div>

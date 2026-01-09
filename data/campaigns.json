@@ -31,6 +31,72 @@
       },
       "stats": {
         "scheduled": 50,
+        "sent": 50,
+        "delivered": 50,
+        "opened": 14,
+        "replied": 4,
+        "successful": 1,
+        "bounced": 0,
+        "unsubscribed": 0
+      },
+      "settings": {
+        "sender_emails": [
+          "aaron@intralog.io",
+          "michael@intralog.io",
+          "mark@intralog.io"
+        ],
+        "tracking": {
+          "opens": true,
+          "clicks": false
+        },
+        "schedule": {
+          "days": [
+            "Mon",
+            "Tue",
+            "Wed",
+            "Thu",
+            "Fri"
+          ],
+          "start_time": "09:00",
+          "end_time": "17:00",
+          "timezone": "MST (Mountain Standard Time)"
+        },
+        "daily_limit": 40,
+        "follow_up_delay_days": 4,
+        "on_hold": false
+      }
+    },
+    {
+      "id": "campaign-2",
+      "name": "Test Campaign",
+      "status": "draft",
+      "created_at": "2026-01-09",
+      "lead_source": "data/uploads/20260109_142649_Brysons_Leads.csv",
+      "output_file": "",
+      "sequence": {
+        "email_1": {
+          "variant_a": {
+            "subject": "Quick thought on {{industry}} operations",
+            "body": "Hi {{first_name}},\n\n{{personalization_sentence}}\n\n{{credibility_anchor}}\n\n{{cta_line}}\n\n{{signature}}"
+          },
+          "variant_b": {
+            "subject": "Quick thought on {{industry}} operations",
+            "body": "Hi {{first_name}},\n\n{{personalization_sentence}}\n\n{{credibility_anchor}}\n\n{{cta_line}}\n\n{{signature}}"
+          }
+        },
+        "email_2": {
+          "variant_a": {
+            "subject": "Re: Quick thought on {{industry}} operations",
+            "body": "Hi {{first_name}},\n\n{{reinforcement_line}}\n\n{{cta_line_followup}}\n\n{{signature}}"
+          },
+          "variant_b": {
+            "subject": "Re: Quick thought on {{industry}} operations",
+            "body": "Hi {{first_name}},\n\n{{reinforcement_line}}\n\n{{cta_line_followup}}\n\n{{signature}}"
+          }
+        }
+      },
+      "stats": {
+        "scheduled": 50,
         "sent": 0,
         "delivered": 0,
         "opened": 0,

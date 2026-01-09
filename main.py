@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -140,12 +141,162 @@ EQUIPMENT_ANCHOR_KEYWORDS = {
     "wms": ["wms", "warehouse management"]
 }
 
-CTA_ACTIONS = {
-    "throughput": "sanity-check the flow",
-    "space": "compare layout options",
-    "labor": "pressure-test labor assumptions",
-    "reconfiguration": "map re-slotting options",
-    "integration": "walk through handoffs"
+CTA_ACTION_VARIANTS = {
+    "throughput": [
+        "sanity-check the flow",
+        "pressure-test the handoff",
+        "brainstorm choke-points",
+        "review the handoffs"
+    ],
+    "space": [
+        "compare layout options",
+        "pressure-test density tradeoffs",
+        "map access constraints"
+    ],
+    "labor": [
+        "pressure-test labor assumptions",
+        "review labor coverage",
+        "sanity-check shift balance"
+    ],
+    "reconfiguration": [
+        "map re-slotting options",
+        "review layout adjustments",
+        "pressure-test slotting changes"
+    ],
+    "integration": [
+        "walk through handoffs",
+        "review system interfaces",
+        "pressure-test integration points"
+    ]
+}
+
+CTA_TEMPLATES = {
+    "high": [
+        "Can we {action} next week?",
+        "Can we {action} this week?",
+        "Let's {action} next week."
+    ],
+    "medium": [
+        "If useful, I can {action}.",
+        "Happy to {action} if that helps.",
+        "If it helps, I can {action}."
+    ],
+    "low": [
+        "If helpful, I can {action}.",
+        "Happy to {action} if useful.",
+        "If it helps, I can {action}."
+    ]
+}
+
+CTA_FOLLOWUP_TEMPLATES = {
+    "high": [
+        "Want me to {action} and send a quick readout?",
+        "I can {action} and send a short readout if you'd like.",
+        "Happy to {action} and share a {industry} example if useful."
+    ],
+    "medium": [
+        "Happy to {action} and share a short example if helpful.",
+        "If useful, I can {action} and send a quick note.",
+        "Happy to {action} and share a {industry} example if useful."
+    ],
+    "low": [
+        "If helpful, I can {action} and share a quick example.",
+        "Happy to {action} and send a short note if useful.",
+        "Happy to {action} and share a {industry} example if it helps."
+    ]
+}
+
+CREDIBILITY_TEMPLATES = [
+    "We work on {equipment_category}.",
+    "We design and install {equipment_category}.",
+    "We implement {equipment_category} with OEM partners."
+]
+
+SUBJECT_TEMPLATES_BY_THEME = {
+    "throughput": [
+        "Where throughput tightens first",
+        "Throughput handoff check",
+        "Throughput bottleneck question"
+    ],
+    "space": [
+        "Density vs access",
+        "Space tradeoffs in {industry}",
+        "Storage density question"
+    ],
+    "labor": [
+        "Labor balance in {industry}",
+        "Where labor gets thin",
+        "Labor coverage question"
+    ],
+    "reconfiguration": [
+        "Layout shifts in {industry}",
+        "Re-slotting timing",
+        "Layout change question"
+    ],
+    "integration": [
+        "System handoff check",
+        "Controls handoff question",
+        "Integration handoff note"
+    ]
+}
+
+SUBJECT_TEMPLATES_BY_ICP = {
+    "ICP 1": [
+        "Pick module flow",
+        "Racking layout check"
+    ],
+    "ICP 2": [
+        "Cold storage density",
+        "Pallet access tradeoffs"
+    ],
+    "ICP 3": [
+        "Material flow handoffs",
+        "Expansion flow check"
+    ],
+    "ICP 4": [
+        "Throughput merge points",
+        "Sortation handoff note"
+    ],
+    "ICP 5": [
+        "High-density automation",
+        "Phased automation handoffs"
+    ]
+}
+
+REINFORCEMENT_DETAILS = {
+    "throughput": ["merge or induction points", "accumulation zones", "divert logic"],
+    "space": ["staging vs storage access", "aisle access tradeoffs", "pallet access timing"],
+    "labor": ["picking and replen coverage", "shift handoffs", "replen timing"],
+    "reconfiguration": ["slotting changes", "pick path updates", "zone re-balance"],
+    "integration": ["controls handoffs", "WMS interface timing", "zone-to-zone signals"]
+}
+
+REINFORCEMENT_TEMPLATES = {
+    "throughput": [
+        "In {industry} flow, throughput {adverb} tightens at {detail}.",
+        "In {industry} ops, {detail} is usually where throughput starts to cap.",
+        "In {industry} ops, the first pinch is often {detail}."
+    ],
+    "space": [
+        "In {industry} ops, density and access {adverb} collide at {detail}.",
+        "In {industry} facilities, {detail} is usually where space tradeoffs surface.",
+        "In {industry} ops, space pressure often shows up around {detail}."
+    ],
+    "labor": [
+        "In {industry} ops, labor balance {adverb} tightens around {detail}.",
+        "In {industry} ops, {detail} is usually where coverage starts to slip.",
+        "In {industry} ops, labor strain often shows up at {detail}."
+    ],
+    "reconfiguration": [
+        "In {industry} ops, layout shifts {adverb} lag at {detail}.",
+        "In {industry} ops, {detail} is usually where layout drift shows first.",
+        "In {industry} ops, reconfiguration pressure often shows up at {detail}."
+    ],
+    "integration": [
+        "In {industry} ops, handoffs {adverb} drag at {detail}.",
+        "In {industry} ops, {detail} is usually where integration slows.",
+        "In {industry} ops, integration friction often shows up at {detail}."
+    ]
 }
 
 
@@ -171,6 +322,36 @@ def normalize_text(value) -> str:
     if value is None or pd.isna(value):
         return ""
     return str(value).strip()
+
+
+def deterministic_index(seed: str, modulo: int) -> int:
+    if modulo <= 0:
+        return 0
+    safe_seed = seed or "default"
+    digest = hashlib.md5(safe_seed.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % modulo
+
+
+def deterministic_choice(seed: str, options: list[str], salt: str = "") -> str:
+    if not options:
+        return ""
+    index = deterministic_index(f"{seed}|{salt}", len(options))
+    return options[index]
+
+
+def slugify(text: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in text or "")
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned.strip("-") or "default"
+
+
+def select_variant(seed: str, options: list[str], variant_key: str, salt: str = "") -> tuple[str, str]:
+    if not options:
+        return f"{variant_key}-0", ""
+    index = deterministic_index(f"{seed}|{salt}", len(options))
+    variant_id = f"{variant_key}-{index + 1}"
+    return variant_id, options[index]
 
 
 def classify_role_level(job_title: str) -> str:
@@ -245,25 +426,53 @@ def confidence_to_certainty(icp_confidence: str) -> str:
     return "light"
 
 
-def build_credibility_anchor(equipment_category: str) -> str:
-    return f"We work on {equipment_category}."
+def build_credibility_anchor(equipment_category: str, seed: str) -> tuple[str, str]:
+    variant_key = f"cred-{slugify(equipment_category)}"
+    variant_id, template = select_variant(
+        seed,
+        CREDIBILITY_TEMPLATES,
+        variant_key,
+        f"credibility-{equipment_category}"
+    )
+    return variant_id, template.format(equipment_category=equipment_category)
 
 
-def build_cta_line(pain_theme: str, icp_confidence: str, followup: bool = False) -> tuple[str, str]:
-    action = CTA_ACTIONS.get(pain_theme, "sanity-check the flow")
-    label = action.replace("the ", "")
+def build_cta_line(
+    pain_theme: str,
+    icp_confidence: str,
+    industry: str,
+    seed: str,
+    followup: bool = False
+) -> tuple[str, str, str]:
+    action_options = CTA_ACTION_VARIANTS.get(pain_theme, CTA_ACTION_VARIANTS["throughput"])
+    action_variant_id, action = select_variant(
+        seed,
+        action_options,
+        f"cta-action-{pain_theme}",
+        f"cta-action-{pain_theme}"
+    )
 
-    if icp_confidence == "high":
-        line = f"Can we {action} this week?" if followup else f"Can we {action} next week?"
-    elif icp_confidence == "medium":
-        line = f"I can {action} if that helps." if followup else f"If useful, I can {action}."
-    else:
-        line = f"If helpful, I can {action}."
+    confidence_key = icp_confidence if icp_confidence in CTA_TEMPLATES else "low"
+    templates = CTA_FOLLOWUP_TEMPLATES if followup else CTA_TEMPLATES
+    template_variant_id, template = select_variant(
+        seed,
+        templates[confidence_key],
+        f"cta-template-{pain_theme}-{confidence_key}",
+        f"cta-template-{pain_theme}-{confidence_key}-{'f' if followup else 'i'}"
+    )
 
-    return label, line
+    industry_text = normalize_text(industry) or "operations"
+    line = template.format(action=action, industry=industry_text)
+    cta_variant_id = f"{action_variant_id}-{template_variant_id}"
+    return cta_variant_id, action, line
 
 
-def build_reinforcement_line(pain_theme: str, industry: str, icp_confidence: str) -> str:
+def build_reinforcement_line(
+    pain_theme: str,
+    industry: str,
+    icp_confidence: str,
+    seed: str
+) -> tuple[str, str]:
     industry_text = normalize_text(industry) or "operations"
     if icp_confidence == "high":
         adverb = "almost always"
@@ -272,15 +481,18 @@ def build_reinforcement_line(pain_theme: str, industry: str, icp_confidence: str
     else:
         adverb = "can"
 
-    lines = {
-        "throughput": f"In {industry_text} flow, the tight spot {adverb} sits between storage and picking.",
-        "space": f"In {industry_text} facilities, density and access {adverb} pull against each other.",
-        "labor": f"In {industry_text} ops, labor balance {adverb} tightens around picking and replenishment.",
-        "reconfiguration": f"In {industry_text} ops, layout changes {adverb} lag shifts in SKU mix.",
-        "integration": f"In {industry_text} ops, system handoffs {adverb} become the longest tail."
-    }
+    details = REINFORCEMENT_DETAILS.get(pain_theme, REINFORCEMENT_DETAILS["throughput"])
+    detail_variant_id, detail = select_variant(seed, details, f"detail-{pain_theme}", f"detail-{pain_theme}")
 
-    return lines.get(pain_theme, lines["throughput"])
+    templates = REINFORCEMENT_TEMPLATES.get(pain_theme, REINFORCEMENT_TEMPLATES["throughput"])
+    template_variant_id, template = select_variant(
+        seed,
+        templates,
+        f"reinforce-{pain_theme}",
+        f"reinforce-{pain_theme}"
+    )
+    variant_id = f"{template_variant_id}-{detail_variant_id}"
+    return variant_id, template.format(industry=industry_text, adverb=adverb, detail=detail)
 
 
 def get_equipment_offer(icp_match: str, equipment: str, notes: str) -> tuple[str, str]:
@@ -339,32 +551,19 @@ def get_equipment_offer(icp_match: str, equipment: str, notes: str) -> tuple[str
     return (equipment_category, software_mention)
 
 
-def get_subject_line_by_icp(icp_match: str, industry: str) -> str:
+def get_subject_line(icp_match: str, pain_theme: str, industry: str, seed: str) -> tuple[str, str]:
     """
-    Get ICP-specific subject line variant
-
-    Args:
-        icp_match: ICP segment (e.g., "ICP 1", "ICP 2", etc.)
-        industry: Industry classification
-
-    Returns:
-        Customized subject line
+    Get a deterministic subject line variation based on ICP and pain theme.
     """
-    # Map ICP segments to specific subject lines
-    icp_subjects = {
-        "ICP 1": "Quick thought on pick module efficiency",
-        "ICP 2": "Quick thought on cold storage density",
-        "ICP 3": "Quick thought on material flow layout",
-        "ICP 4": "Quick thought on throughput scaling",
-        "ICP 5": "Quick thought on high-density automation"
-    }
+    industry_text = normalize_text(industry) or "operations"
+    theme_templates = SUBJECT_TEMPLATES_BY_THEME.get(pain_theme, [])
+    icp_templates = SUBJECT_TEMPLATES_BY_ICP.get(icp_match, [])
+    fallback = [f"Quick thought on {industry_text} operations"]
 
-    # Return ICP-specific subject or default
-    if icp_match in icp_subjects:
-        return icp_subjects[icp_match]
-    else:
-        # Default fallback using industry
-        return f"Quick thought on {industry} operations"
+    options = theme_templates + icp_templates + fallback
+    variant_key = f"subject-{pain_theme}-{slugify(icp_match)}"
+    variant_id, selected = select_variant(seed, options, variant_key, "subject")
+    return variant_id, selected.replace("{industry}", industry_text)
 
 
 def load_email_template(template_name: str) -> tuple[str, str]:
@@ -553,16 +752,47 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
         # Assign sender in round-robin fashion
         sender = Config.get_sender_profile(idx)
 
-        # Get ICP-specific subject line
-        custom_subject = get_subject_line_by_icp(icp_match, industry)
+        base_seed = f"{company_name}|{sender['email']}"
+        seed_email_1 = f"{base_seed}|1"
+        seed_email_2 = f"{base_seed}|2"
+        personalization_hash_email_1 = hashlib.md5(seed_email_1.encode("utf-8")).hexdigest()
+        personalization_hash_email_2 = hashlib.md5(seed_email_2.encode("utf-8")).hexdigest()
+
+        # Get subject line variant
+        subject_variant_id, custom_subject = get_subject_line(
+            icp_match,
+            pain_theme,
+            industry,
+            seed_email_1
+        )
 
         # Get equipment offer based on ICP + equipment context
         equipment_category, software_mention = get_equipment_offer(icp_match, equipment, icp_notes)
 
-        credibility_anchor = build_credibility_anchor(equipment_category)
-        cta_label, cta_line = build_cta_line(pain_theme, icp_confidence, followup=False)
-        _, cta_line_followup = build_cta_line(pain_theme, icp_confidence, followup=True)
-        reinforcement_line = build_reinforcement_line(pain_theme, industry, icp_confidence)
+        credibility_variant_id, credibility_anchor = build_credibility_anchor(
+            equipment_category,
+            seed_email_1
+        )
+        cta_variant_id, cta_label, cta_line = build_cta_line(
+            pain_theme,
+            icp_confidence,
+            industry,
+            seed_email_1,
+            followup=False
+        )
+        cta_variant_id_followup, _, cta_line_followup = build_cta_line(
+            pain_theme,
+            icp_confidence,
+            industry,
+            seed_email_2,
+            followup=True
+        )
+        reinforcement_variant_id, reinforcement_line = build_reinforcement_line(
+            pain_theme,
+            industry,
+            icp_confidence,
+            seed_email_2
+        )
 
         # Data for template filling
         template_data = {
@@ -581,16 +811,44 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "credibility_anchor": credibility_anchor,
             "cta_line": cta_line,
             "cta_line_followup": cta_line_followup,
-            "reinforcement_line": reinforcement_line
+            "reinforcement_line": reinforcement_line,
+            "subject_variant_id": subject_variant_id,
+            "cta_variant_id": cta_variant_id,
+            "cta_variant_id_followup": cta_variant_id_followup,
+            "credibility_variant_id": credibility_variant_id,
+            "reinforcement_variant_id": reinforcement_variant_id
         }
 
-        personalization_object = {
+        personalization_object_email_1 = {
             "pain_theme": pain_theme,
             "certainty_level": certainty_level,
             "equipment_anchor": equipment_anchor_list,
-            "personalization_sentence": personalization
+            "personalization_sentence": personalization,
+            "subject_variant_id": subject_variant_id,
+            "cta_variant_id": cta_variant_id,
+            "credibility_variant_id": credibility_variant_id,
+            "reinforcement_variant_id": "",
+            "personalization_hash": personalization_hash_email_1
         }
-        personalization_object_json = json.dumps(personalization_object, ensure_ascii=True)
+        personalization_object_email_2 = {
+            "pain_theme": pain_theme,
+            "certainty_level": certainty_level,
+            "equipment_anchor": equipment_anchor_list,
+            "personalization_sentence": personalization,
+            "subject_variant_id": subject_variant_id,
+            "cta_variant_id": cta_variant_id_followup,
+            "credibility_variant_id": credibility_variant_id,
+            "reinforcement_variant_id": reinforcement_variant_id,
+            "personalization_hash": personalization_hash_email_2
+        }
+        personalization_object_json_email_1 = json.dumps(
+            personalization_object_email_1,
+            ensure_ascii=True
+        )
+        personalization_object_json_email_2 = json.dumps(
+            personalization_object_email_2,
+            ensure_ascii=True
+        )
 
         # Email 1 (use custom ICP subject instead of template subject)
         campaign_rows.append({
@@ -603,7 +861,8 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "subject": custom_subject,
             "body": fill_template(email_1_body, template_data),
             "personalization_sentence": personalization,
-            "personalization_object": personalization_object_json,
+            "personalization_object": personalization_object_json_email_1,
+            "personalization_hash": personalization_hash_email_1,
             "industry": industry,
             "icp_match": icp_match,
             "role_level": row.get("role_level", "unknown"),
@@ -618,7 +877,10 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "certainty_level": certainty_level,
             "cta_label": cta_label,
             "cta_line": cta_line,
+            "cta_variant_id": cta_variant_id,
+            "subject_variant_id": subject_variant_id,
             "credibility_anchor": credibility_anchor,
+            "credibility_variant_id": credibility_variant_id,
             "sender_name": sender["full_name"],
             "sender_email": sender["email"],
             "sender_title": sender["title"]
@@ -635,7 +897,8 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "subject": f"Re: {custom_subject}",
             "body": fill_template(email_2_body, template_data),
             "personalization_sentence": personalization,
-            "personalization_object": personalization_object_json,
+            "personalization_object": personalization_object_json_email_2,
+            "personalization_hash": personalization_hash_email_2,
             "industry": industry,
             "icp_match": icp_match,
             "role_level": row.get("role_level", "unknown"),
@@ -650,8 +913,12 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "certainty_level": certainty_level,
             "cta_label": cta_label,
             "cta_line": cta_line_followup,
+            "cta_variant_id": cta_variant_id_followup,
+            "subject_variant_id": subject_variant_id,
             "credibility_anchor": credibility_anchor,
+            "credibility_variant_id": credibility_variant_id,
             "reinforcement_line": reinforcement_line,
+            "reinforcement_variant_id": reinforcement_variant_id,
             "sender_name": sender["full_name"],
             "sender_email": sender["email"],
             "sender_title": sender["title"]
