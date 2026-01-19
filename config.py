@@ -17,6 +17,27 @@ class Config:
     # SendGrid Configuration
     SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 
+    # Apollo.io Configuration
+    APOLLO_API_KEY = os.getenv("APOLLO_API_KEY")
+    APOLLO_RATE_LIMIT_DELAY = 0.5  # seconds between calls
+    APOLLO_PERSON_TTL_DAYS = 90
+    APOLLO_COMPANY_TTL_DAYS = 180
+    APOLLO_SUPPRESSION_DAYS = 180
+    APOLLO_BULK_MATCH_SIZE = 10
+
+    # Bland.ai Voice Call Configuration
+    BLAND_API_KEY = os.getenv("BLAND_API_KEY")
+
+    # LinkedIn Automation Configuration
+    LINKEDIN_EMAIL = os.getenv("LINKEDIN_EMAIL")
+    LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
+    LINKEDIN_MAX_CONNECTIONS_PER_DAY = 30
+    LINKEDIN_MIN_DELAY_SECONDS = 120  # 2 minutes between actions
+    LINKEDIN_MAX_DELAY_SECONDS = 300  # 5 minutes
+
+    # Base URL for webhooks
+    BASE_URL = os.getenv("BASE_URL", "http://localhost:7000")
+
     # Sender Profiles with Email Signatures
     SENDER_PROFILES = [
         {
@@ -80,6 +101,12 @@ www.intralog.io"""
 
         if not cls.SENDER_PROFILES or len(cls.SENDER_PROFILES) == 0:
             errors.append("No sender profiles configured")
+
+        # Apollo API key is optional but recommended for enrichment
+        if not cls.APOLLO_API_KEY:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("APOLLO_API_KEY not set - enrichment features will be unavailable")
 
         if errors:
             raise ValueError(

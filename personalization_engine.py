@@ -146,6 +146,13 @@ def generate_personalization(company_data: dict, client: OpenAI, prompt_template
     certainty_level = company_data.get("certainty_level", "")
     icp_confidence = company_data.get("icp_confidence", "")
 
+    # Extract Apollo enrichment data (optional)
+    technologies = company_data.get("technologies", "Not available")
+    employee_count = company_data.get("employee_count", "Not available")
+    job_postings_relevant = company_data.get("job_postings_relevant", "Not available")
+    wms_system = company_data.get("wms_system", "unknown")
+    equipment_signals = company_data.get("equipment_signals", "Not detected")
+
     # Convert to strings and handle NaN values
     company_name = str(company_name) if pd.notna(company_name) else ""
     industry = str(industry) if pd.notna(industry) else ""
@@ -159,6 +166,13 @@ def generate_personalization(company_data: dict, client: OpenAI, prompt_template
     certainty_level = str(certainty_level) if pd.notna(certainty_level) else ""
     icp_confidence = str(icp_confidence) if pd.notna(icp_confidence) else ""
 
+    # Convert enrichment data to strings
+    technologies = str(technologies) if pd.notna(technologies) and technologies != "Not available" else "Not available"
+    employee_count = str(employee_count) if pd.notna(employee_count) and employee_count != "Not available" else "Not available"
+    job_postings_relevant = str(job_postings_relevant) if pd.notna(job_postings_relevant) and job_postings_relevant != "Not available" else "Not available"
+    wms_system = str(wms_system) if pd.notna(wms_system) and wms_system != "unknown" else "unknown"
+    equipment_signals = str(equipment_signals) if pd.notna(equipment_signals) and equipment_signals != "Not detected" else "Not detected"
+
     # Fill in the prompt template with new fields
     prompt = prompt_template.replace("{{company_name}}", company_name)
     prompt = prompt.replace("{{industry}}", industry)
@@ -171,6 +185,13 @@ def generate_personalization(company_data: dict, client: OpenAI, prompt_template
     prompt = prompt.replace("{{equipment_anchor}}", equipment_anchor)
     prompt = prompt.replace("{{certainty_level}}", certainty_level)
     prompt = prompt.replace("{{icp_confidence}}", icp_confidence)
+
+    # Fill in enrichment data
+    prompt = prompt.replace("{{technologies}}", technologies)
+    prompt = prompt.replace("{{employee_count}}", employee_count)
+    prompt = prompt.replace("{{job_postings_relevant}}", job_postings_relevant)
+    prompt = prompt.replace("{{wms_system}}", wms_system)
+    prompt = prompt.replace("{{equipment_signals}}", equipment_signals)
 
     # Attempt generation with retries
     for attempt in range(Config.MAX_RETRIES):
@@ -259,3 +280,271 @@ def batch_generate(df: pd.DataFrame) -> pd.DataFrame:
         logger.warning(f"⚠ {failed_count} failures - review output carefully")
 
     return df
+
+
+# ====================
+# NEW: Three Personalization Modes
+# ====================
+
+def extract_intent_signals(apollo_data: dict) -> dict:
+    """Extract intent signals from Apollo enrichment data."""
+    signals = {
+        'primary_signal': None,
+        'context': '',
+        'signal_type': None
+    }
+
+    # Job postings signal
+    job_postings = apollo_data.get('job_postings_relevant', 0)
+    if job_postings and int(job_postings) > 0:
+        signals['primary_signal'] = f"recently posted {job_postings} warehouse/automation roles"
+        signals['signal_type'] = 'hiring'
+        signals['context'] = f"expansion/hiring activity"
+        return signals
+
+    # Tech stack signal
+    equipment_signals = apollo_data.get('equipment_signals', '')
+    if equipment_signals and equipment_signals != 'Not detected':
+        equipment_list = equipment_signals.split(',')
+        if len(equipment_list) > 0:
+            signals['primary_signal'] = f"currently using {equipment_list[0].strip()}"
+            signals['signal_type'] = 'tech_stack'
+            signals['context'] = f"existing automation infrastructure"
+            return signals
+
+    # WMS signal
+    wms_system = apollo_data.get('wms_system', '')
+    if wms_system and wms_system != 'unknown':
+        signals['primary_signal'] = f"running {wms_system} WMS"
+        signals['signal_type'] = 'wms'
+        signals['context'] = f"established warehouse management system"
+        return signals
+
+    # Employee count growth signal
+    employee_count = apollo_data.get('employee_count', 0)
+    if employee_count:
+        try:
+            count = int(employee_count)
+            if count > 300:
+                signals['primary_signal'] = f"scaled to {count}+ employees"
+                signals['signal_type'] = 'growth'
+                signals['context'] = f"rapid growth phase"
+                return signals
+        except:
+            pass
+
+    # Default fallback
+    industry = apollo_data.get('industry', '')
+    company_name = apollo_data.get('Company', apollo_data.get('company_name', ''))
+    if industry:
+        signals['primary_signal'] = f"operates in {industry}"
+        signals['signal_type'] = 'industry'
+        signals['context'] = f"{industry} operations"
+
+    return signals
+
+
+def generate_signal_based_email(lead_data: dict, apollo_data: dict, client: OpenAI) -> tuple[str, bool]:
+    """
+    Generate signal-based personalization using intent data from Apollo.
+
+    Returns:
+        (opener_text, success_flag)
+    """
+    signals = extract_intent_signals(apollo_data)
+    company_name = lead_data.get('Company', lead_data.get('company_name', ''))
+    first_name = lead_data.get('first_name', lead_data.get('First Name', ''))
+
+    if not signals['primary_signal']:
+        return "", False
+
+    prompt = f"""Write a 2-3 sentence email opener for a cold outreach email.
+
+Context:
+- Company: {company_name}
+- Signal: {signals['primary_signal']}
+- Signal type: {signals['signal_type']}
+
+Requirements:
+- Reference the specific signal naturally (not "I noticed")
+- Connect the signal to a relevant pain point (capacity, labor costs, cube utilization)
+- Keep it concise and direct
+- No marketing fluff or buzzwords
+- Total length: 40-60 words
+
+Example format: "{company_name} {signals['primary_signal']}. [Connect to pain point]. [Transition to value prop]"
+
+Write the opener:"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=100
+        )
+
+        opener = response.choices[0].message.content.strip()
+        return opener, True
+
+    except Exception as e:
+        logger.error(f"Signal-based generation failed: {e}")
+        return "", False
+
+
+def generate_fully_personalized_email(lead_data: dict, apollo_data: dict, client: OpenAI, template_context: dict) -> tuple[str, bool]:
+    """
+    Generate fully personalized email body using AI.
+
+    Args:
+        lead_data: Lead information (name, title, company)
+        apollo_data: Enrichment data from Apollo
+        client: OpenAI client
+        template_context: Additional context (strategy, pain theme, etc.)
+
+    Returns:
+        (email_body, success_flag)
+    """
+    company_name = lead_data.get('Company', lead_data.get('company_name', ''))
+    first_name = lead_data.get('first_name', lead_data.get('First Name', ''))
+    title = lead_data.get('title', lead_data.get('Job title', ''))
+    industry = apollo_data.get('industry', apollo_data.get('Industry', ''))
+    employee_count = apollo_data.get('employee_count', '')
+    pain_theme = template_context.get('pain_theme', 'throughput')
+    strategy = template_context.get('strategy', 'conventional')
+
+    # Build context
+    context_parts = [f"Company: {company_name}"]
+    if title:
+        context_parts.append(f"Title: {title}")
+    if industry:
+        context_parts.append(f"Industry: {industry}")
+    if employee_count:
+        context_parts.append(f"Size: {employee_count} employees")
+
+    context = "\n".join(context_parts)
+
+    prompt = f"""Write a complete personalized cold email body (100-120 words) for Intralog, a warehouse storage systems company.
+
+Recipient Context:
+{context}
+
+Pain Theme: {pain_theme}
+Strategy: {strategy}
+
+Intralog offers:
+- Conventional: Racking systems, mezzanines, pick modules
+- Semi-automation: High-density racking, pallet shuttles, VLMs
+- Full automation: ASRS, conveyors, sortation systems
+
+Email Structure:
+1. Personalized opener (2 sentences) - reference their specific operational context
+2. Value proposition (1-2 sentences) - how Intralog solves their challenge
+3. Proof point (1 sentence) - specific case study or metric
+4. Soft CTA (1 sentence) - "Worth a 15-minute call to evaluate cost per unit reduction?"
+
+Requirements:
+- Direct, operationally intelligent tone
+- No buzzwords ("game-changer", "revolutionary")
+- No "I noticed", "I saw", "reaching out"
+- Focus on measurable ROI (cost per unit, throughput, cube utilization)
+
+Write the email body:"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert B2B copywriter for industrial sales. Write concise, direct emails that demonstrate operational knowledge."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=250
+        )
+
+        email_body = response.choices[0].message.content.strip()
+        return email_body, True
+
+    except Exception as e:
+        logger.error(f"Fully personalized generation failed: {e}")
+        return "", False
+
+
+def generate_personalized_opener_email(lead_data: dict, apollo_data: dict, client: OpenAI) -> tuple[str, bool]:
+    """
+    Generate personalized opener (first 1-2 sentences only).
+    Rest of email uses template.
+
+    Returns:
+        (opener_text, success_flag)
+    """
+    company_name = lead_data.get('Company', lead_data.get('company_name', ''))
+    first_name = lead_data.get('first_name', lead_data.get('First Name', ''))
+    title = lead_data.get('title', lead_data.get('Job title', ''))
+    industry = apollo_data.get('industry', apollo_data.get('Industry', ''))
+
+    # Build minimal context
+    context_parts = [f"Company: {company_name}"]
+    if title:
+        context_parts.append(f"Role: {title}")
+    if industry:
+        context_parts.append(f"Industry: {industry}")
+
+    context = "\n".join(context_parts)
+
+    prompt = f"""Write a personalized 1-2 sentence opener for a cold email.
+
+Context:
+{context}
+
+Requirements:
+- Reference something specific about their company, role, or industry
+- Natural and conversational
+- No "I noticed", "I saw", "I came across"
+- No marketing verbs (improve, boost, optimize)
+- Total length: 20-30 words
+
+Example: "{first_name}, {company_name}'s 3PL operations in Utah likely face the same cube utilization challenges most fulfillment centers are wrestling with right now."
+
+Write the opener:"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=80
+        )
+
+        opener = response.choices[0].message.content.strip()
+        return opener, True
+
+    except Exception as e:
+        logger.error(f"Personalized opener generation failed: {e}")
+        return "", False
+
+
+def generate_email_by_mode(mode: str, lead_data: dict, apollo_data: dict, template_context: dict = None) -> tuple[str, bool]:
+    """
+    Generate email content based on personalization mode.
+
+    Args:
+        mode: 'signal_based', 'fully_personalized', or 'personalized_opener'
+        lead_data: Lead information
+        apollo_data: Apollo enrichment data
+        template_context: Additional context for generation
+
+    Returns:
+        (generated_content, success_flag)
+    """
+    client = OpenAI(api_key=Config.OPENAI_API_KEY)
+
+    if mode == 'signal_based':
+        return generate_signal_based_email(lead_data, apollo_data, client)
+    elif mode == 'fully_personalized':
+        return generate_fully_personalized_email(lead_data, apollo_data, client, template_context or {})
+    elif mode == 'personalized_opener':
+        return generate_personalized_opener_email(lead_data, apollo_data, client)
+    else:
+        logger.error(f"Unknown personalization mode: {mode}")
+        return "", False

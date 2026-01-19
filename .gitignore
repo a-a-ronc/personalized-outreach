@@ -1,11 +1,52 @@
+# Environment and secrets
 .env
-output/
+*.env
+!.env.example
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 .venv/
 venv/
+ENV/
+
+# Logs
 *.log
 logs/
+
+# Database (keep structure, ignore data)
+data/leads.db
+data/uploads/
+
+# Frontend
 dashboard/node_modules/
 dashboard/dist/
-data/uploads/
+dashboard/.vite/
+
+# Output and temp files
+output/
+temp/
+tmp/
+*.tmp
+tmpclaude-*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Replit
+.replit_cache/
+.config/
+
+# Test outputs
+test_output/

@@ -1,194 +1,206 @@
-﻿# Personalized Outreach System
+# Apollo-Level Personalized Outreach Platform
 
-Generate 1:1-feeling B2B outreach at scale with strict personalization controls. The system uses deterministic logic for pain themes, CTA selection, certainty level, and follow-up framing. The LLM only writes a single personalization sentence.
+Multi-channel outreach automation with AI personalization, voice calls, LinkedIn automation, and email sequences. Built for B2B sales teams targeting 3PL, logistics, and warehouse automation prospects.
 
-## What This Includes
+## 🚀 Features
 
-- CLI campaign generator (CSV in, CSV out)
-- Local upload UI (simple web app)
-- Campaign Studio (React + API) with campaigns, audience, content, emails, statistics, and settings
-- Deterministic personalization control object (pain theme, certainty, equipment anchors)
-- ICP confidence scoring that drives verb strength and CTA assertiveness
+### Multi-Channel Sequences
+- **Email**: SendGrid integration with 3 personalization modes
+- **AI Voice Calls**: Bland.ai automated calling with dynamic scripts
+- **LinkedIn**: Headless browser automation for connections and messages
+- **Smart Delays**: Configurable wait times between touches
 
-## Quick Start
+### 3 Personalization Modes
+1. **Signal-Based**: Intent data from Apollo (job postings, tech stack, funding)
+2. **Fully Personalized**: AI writes complete email (100-120 words)
+3. **Personalized Opener**: AI writes first 1-2 sentences only
 
-### 1. Install Dependencies
+### Rich Campaign Studio
+- Variable autocomplete (24 template variables)
+- Live email preview with test sending
+- Visual sequence builder (drag-and-drop)
+- Campaign statistics and A/B testing
+- Outlook signature import with logo embedding
 
+### Apollo Integration
+- Lead enrichment API
+- Phone number reveals (1 credit)
+- Company data and signals
+- Credit usage tracking
+
+## ⚡ Quick Start (Replit - 5 Minutes)
+
+### 1. Deploy to Replit
+See [REPLIT_SETUP.md](REPLIT_SETUP.md) for detailed instructions.
+
+### 2. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Set Up Environment Variables
-
-Copy the example environment file and fill in your API keys:
-
+### 3. Configure Environment
+Copy `.env.example` to `.env` and add your API keys:
 ```bash
-cp .env.example .env
+OPENAI_API_KEY=sk-...
+SENDGRID_API_KEY=SG...
+BLAND_API_KEY=...
+APOLLO_API_KEY=...
+LINKEDIN_EMAIL=...
+LINKEDIN_PASSWORD=...
 ```
 
-Edit `.env` with your credentials:
-
-```
-OPENAI_API_KEY=your-openai-api-key-here
-SENDGRID_API_KEY=your-sendgrid-api-key-here
-```
-
-### 3. Generate Your First Campaign (CLI)
-
+### 4. Initialize Database
 ```bash
-python main.py --input data/Master_Leads_Populated_ICP_Equipment.csv --output output/campaigns.csv --limit 10
+python migrate_db.py
 ```
 
-### 4. Local Web App (Optional)
-
+### 5. Start Platform
 ```bash
-python webapp/app.py
+./start.sh
 ```
 
-Then open `http://127.0.0.1:5000`. Upload a CSV, click Generate, and download the output from the page. Output files are saved to `output/`.
+Backend runs on port 7000.
 
-### 5. Campaign Studio (React + API)
-
-Backend (API):
-
+### 6. Test Backend
 ```bash
-python backend/app.py
+python test_backend.py
 ```
 
-Frontend (React):
+All 8 tests should pass ✅
 
-```bash
-cd dashboard
-npm install
-npm run dev
-```
+### 7. Open Dashboard
+Navigate to `dashboard/index.html` in your browser.
 
-Open the URL printed by Vite (default `http://127.0.0.1:5173`). If the backend port differs, set it in the sidebar API field or export:
+## 📊 Platform Architecture
 
-```bash
-set VITE_API_URL=http://127.0.0.1:7000
-```
+### Backend (Flask API)
+- 13 REST endpoints for campaign management
+- SQLite database with schema v2
+- SendGrid email integration
+- Bland.ai voice call orchestration
+- LinkedIn headless browser automation
+- Apollo enrichment with credit tracking
 
-## Personalization Architecture
+### Frontend (React Dashboard)
+- Campaign builder with visual sequence editor
+- Email preview with live personalization
+- Variable autocomplete ({{first_name}}, {{company_name}}, etc.)
+- Statistics and A/B testing dashboard
+- Settings management
 
-- Deterministic control object per lead:
-  - `pain_theme`
-  - `certainty_level`
-  - `equipment_anchor`
-  - `personalization_sentence` (LLM only)
-- ICP confidence scoring: `high | medium | low`
-  - Influences certainty language and CTA assertiveness
-- Pain library: hard-coded by ICP segment and role level
-- CTA selection: deterministic by pain theme
-- Follow-up: reinforcement only, same pain theme, slightly higher certainty (unless low)
-- Negative space: sanitizer strips marketing verbs, features, and benefit phrases
+### Database Schema
+**New Tables:**
+- `sequences` - Multi-step outreach plans
+- `sequence_steps` - Individual actions (email, call, LinkedIn)
+- `signatures` - Outlook signature imports
+- `outreach_log` - Sequence execution tracking
 
-## CSV Input Format
+**Extended Tables:**
+- `leads_people` - LinkedIn status, call history
+- `leads_company` - Enrichment data from Apollo
 
-Required columns:
-- `Company`
-- `Industry`
-- `Email address`
-- `Full name`
+## 🎯 Typical Campaign Flow
 
-Optional columns:
-- `Notes`
-- `ICP Match`
-- `Equipment`
-- `Job title`
+1. **Import Leads** from Apollo (14 leads recommended)
+2. **Enrich Data** with phone numbers and company signals
+3. **Create Campaign** with personalization mode
+4. **Build Sequence**: Email → Wait 3d → Email → Wait 4d → Call → Wait 3d → LinkedIn
+5. **Preview & Test** with real lead data
+6. **Launch** automated sequence
+7. **Monitor** statistics and reply tracking
 
-## Output CSV (Key Fields)
+## 💰 Cost Breakdown (Per Lead)
 
-- `recipient_name`, `recipient_email`, `recipient_job_title`
-- `company_name`, `first_name`, `industry`, `icp_match`, `icp_confidence`
-- `email_sequence`, `subject`, `body`, `sender_name`, `sender_email`, `sender_title`
-- `personalization_sentence`
-- `personalization_object` (JSON)
-- `pain_theme`, `certainty_level`, `pain_statement`
-- `equipment`, `equipment_anchor`, `equipment_category`, `software_mention`
-- `cta_label`, `cta_line`, `credibility_anchor`, `reinforcement_line`
+- OpenAI GPT-4: $0.10-0.15
+- SendGrid: $0 (free tier 100/day)
+- Bland.ai call: $0.80-1.20 (2-4 min avg)
+- Apollo credit: $0.50 (phone reveal)
+- LinkedIn: $0 (headless automation)
 
-## Campaign Studio Data
+**Total: $1.40-2.00 per lead** (full 6-step omnichannel sequence)
 
-- Campaigns are stored in `data/campaigns.json`
-- Uploaded lead lists go to `data/uploads/`
-- Generated campaigns are stored in `output/`
-
-### Settings in Campaign Studio
-
-- Daily send limit
-- Follow-up delay (days)
-- Send window days and times
-- Timezone label (MST - Mountain Standard Time)
-- Sender account rotation and tracking toggles
-
-### Statistics
-
-- `scheduled` auto-populates from output CSV row count
-- `sent`, `delivered`, `opened`, `replied`, `successful`, `bounced`, `unsubscribed` initialize to 0
-- Stats are read-only in the UI and API for now
-
-## Configuration
-
-Edit `config.py` to adjust:
-
-- `OPENAI_MODEL`
-- `OPENAI_TEMPERATURE`
-- `OPENAI_MAX_TOKENS`
-- `MAX_EMAILS_PER_DAY`
-- `BATCH_SIZE`
-- `API_DELAY_SECONDS`
-- Sender profiles and signatures
-
-## Troubleshooting
-
-### "Configuration errors: OPENAI_API_KEY not set"
-
-Create a `.env` file in the project root based on `.env.example` and add your API keys.
-
-### "Missing required columns"
-
-Ensure your input CSV has `Company`, `Industry`, `Email address`, and `Full name`.
-
-### Personalization quality is poor
-
-Edit `templates/personalization_prompt.txt` and regenerate. The prompt expects a single sentence (18-25 words) and must only rephrase the approved pain statement.
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 personalized-outreach/
-  main.py
-  config.py
-  personalization_engine.py
-  requirements.txt
-  .env
-  .env.example
-  .gitignore
-  README.md
-  templates/
-    personalization_prompt.txt
-    email_1.txt
-    email_2.txt
-  data/
-    Master_Leads_Populated_ICP_Equipment.csv
-    campaigns.json
-    uploads/
-  output/
-    campaigns_*.csv
-  webapp/
-    app.py
-    templates/
-    static/
-  backend/
-    app.py
-  dashboard/
-    package.json
-    vite.config.js
-    index.html
-    src/
+├── backend/
+│   └── app.py              # Flask API (2500+ lines)
+├── dashboard/
+│   └── src/
+│       ├── App.jsx         # Main React app
+│       └── components/
+│           ├── SequenceBuilder.jsx
+│           ├── EmailPreview.jsx
+│           └── VariableAutocomplete.jsx
+├── data/
+│   ├── leads.db            # SQLite database
+│   └── campaigns.json      # Campaign configs
+├── templates/
+│   ├── email_1.txt
+│   └── personalization_prompt.txt
+├── apollo_enrichment.py    # Apollo API integration
+├── sequence_engine.py      # Orchestration engine
+├── linkedin_automation.py  # Selenium automation
+├── voice_calls.py          # Bland.ai integration
+├── signature_manager.py    # Outlook signature import
+├── personalization_engine.py
+├── lead_registry.py        # Database layer
+├── config.py
+├── migrate_db.py
+├── test_backend.py
+├── requirements.txt
+└── .replit                 # Replit deployment config
 ```
 
-## License
+## 🔧 Configuration
 
-Internal use only.
+Edit `config.py` or set environment variables:
+
+```python
+OPENAI_MODEL = "gpt-4"
+OPENAI_TEMPERATURE = 0.7
+MAX_EMAILS_PER_DAY = 50
+LINKEDIN_MAX_CONNECTIONS_PER_DAY = 30
+SENDGRID_API_KEY = "SG..."
+BLAND_API_KEY = "..."
+```
+
+## 🐛 Troubleshooting
+
+### Backend won't start
+```bash
+python migrate_db.py  # Initialize database
+python test_backend.py  # Validate endpoints
+```
+
+### Email not sending
+- Check SendGrid API key in `.env`
+- Verify sender email is verified in SendGrid dashboard
+- Review `logs/backend.log`
+
+### LinkedIn automation blocked
+- Use dedicated LinkedIn account (not personal)
+- Reduce daily connection limit to 20
+- Add random delays (2-5 min between actions)
+- Use VPN if IP is flagged
+
+### Apollo enrichment failing
+- Verify API key in `.env`
+- Check credit balance at apollo.io
+- Review `logs/apollo.log`
+
+## 📚 Documentation
+
+- **[REPLIT_SETUP.md](REPLIT_SETUP.md)** - Deploy to Replit in 5 minutes
+- **[IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md)** - Full technical documentation
+- **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Pre-launch verification
+
+## 🎓 Support
+
+Run diagnostics: `python test_backend.py`
+View logs: `tail -f logs/backend.log`
+Check database: `sqlite3 data/leads.db`
+
+## 📄 License
+
+Internal use only. Not for redistribution.

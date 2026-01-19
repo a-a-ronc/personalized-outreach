@@ -1,52 +1,52 @@
-﻿You are generating one single personalization sentence for a B2B outreach email from a material handling systems integrator.
+You are writing a highly personalized B2B outreach email for material handling and warehouse automation.
 
-CONTEXT (AVAILABLE FIELDS)
-
-Industry: {{industry}}
-Job Title: {{job_title}}
-ICP Segment: {{icp_match}}
-ICP Notes: {{notes}}
-Relevant Equipment: {{equipment}}
+## CONTEXT
 Company: {{company_name}}
+Industry: {{industry}}
+Contact: {{job_title}} at {{company_name}}
+ICP Match: {{icp_match}}
+Equipment context: {{equipment}}
+Notes: {{notes}}
 
-CONTROL OBJECT (DETERMINISTIC)
+## APPROVED PAIN STATEMENT
+Theme: {{pain_theme}}
+Statement: "{{pain_statement}}"
 
-Pain theme: {{pain_theme}}
-Approved pain statement: {{pain_statement}}
-Equipment anchors: {{equipment_anchor}}
-Certainty level: {{certainty_level}}
+## ENRICHMENT DATA (if available)
+Technologies: {{technologies}}
+Employee count: {{employee_count}}
+Recent job postings: {{job_postings_relevant}} warehouse/automation roles
+WMS system: {{wms_system}}
+Equipment signals: {{equipment_signals}}
 
-REQUIREMENTS
+## YOUR TASK
+Write ONE sentence (18-25 words) that connects the approved pain statement above to this specific company using the enrichment data provided.
 
-- Generate ONE sentence only (18-25 words max).
-- Use the approved pain statement only; lightly rephrase it and do not add new pains.
-- Do not say or imply you researched their company.
-- Do not make claims about their specific operation unless explicitly stated in ICP Notes.
-- Do not include benefits, outcomes, or marketing verbs.
-- Do not list features or use colons or semicolons.
-- Use equipment anchors only if provided, and keep it subtle.
-- No adjectives unless they are technical.
-- Match certainty level:
-  - strong: usually
-  - moderate: often
-  - light: can
-- Keep tone like an operator talking to an operator.
+## RULES (CRITICAL)
+1. DO NOT use: "I noticed", "I saw", "I found", "I came across", "I researched"
+2. DO NOT use marketing verbs: improve, boost, optimize, enhance, maximize, streamline, transform
+3. DO NOT use benefit phrases: "so you can", "to help you", "which means"
+4. Use operator language, not sales language
+5. Be specific to their situation using enrichment data
+6. Make it feel researched without saying you researched them
+7. Keep certainty level: {{certainty_level}} (strong, moderate, or light)
 
-APPROVED SENTENCE STARTERS (USE ONLY THESE)
+## GOOD EXAMPLES
 
-"We often see teams dealing with..."
-"Many operations reach a point where..."
-"In growing {{industry}} environments..."
-"As {{industry}} operations scale..."
+**Example 1** (High-density storage, strong certainty):
+Approved statement: "Pallet density and access usually start competing as cold volumes expand."
+Enrichment: Technologies include "Manhattan WMS", 2 job postings for warehouse supervisors
+Output: "Cold storage operations with Manhattan usually hit the pallet density ceiling right as supervisor headcount starts scaling."
 
-FORBIDDEN PHRASES (NEVER USE)
+**Example 2** (Sortation, moderate certainty):
+Approved statement: "Throughput often caps at merge points and induction flow."
+Enrichment: Technologies include "Honeywell", industry is e-commerce fulfillment
+Output: "Fulfillment operations running Honeywell sortation often see merge timing become the throughput limit before the sorter itself."
 
-"I noticed..."
-"I saw..."
-"After researching..."
-"Your operation likely..."
-"You are probably dealing with..."
+**Example 3** (Conventional racking, light certainty):
+Approved statement: "Layout changes tend to lag client onboarding and create short-term congestion."
+Enrichment: 3 job postings for warehouse roles, 800 employees
+Output: "3PL operations adding headcount tend to see layout adjustments lag new client ramp-ups by a quarter or two."
 
-OUTPUT
-
-Generate the single personalization sentence now.
+## YOUR OUTPUT
+Write your one sentence below (ONLY the sentence, no preamble):

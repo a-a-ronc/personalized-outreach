@@ -7,6 +7,7 @@ import sys
 import uuid
 import logging
 import hashlib
+import math
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -28,9 +29,36 @@ if str(BASE_DIR) not in sys.path:
 
 from config import Config  # noqa: E402
 from main import generate_campaigns  # noqa: E402
+from lead_registry import (  # noqa: E402
+    init_db,
+    upsert_company,
+    upsert_person,
+    get_person_by_key,
+    get_person_by_email,
+    get_company_by_key,
+    is_suppressed,
+    enqueue_enrichment,
+    insert_queue_record,
+    update_queue_status,
+    get_queue_items,
+    get_queue_summary,
+    get_people_for_campaign,
+    calculate_enrichment_hash,
+    recent_request_hash,
+    log_outreach
+)
+from lead_scoring import (  # noqa: E402
+    extract_features,
+    score_icp,
+    compute_automation_readiness,
+    assign_strategy,
+    normalize_text as normalize_scoring_text
+)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+
+init_db()
 
 ALLOWED_EXTENSIONS = {".csv"}
 REPLY_CLASSES = [
@@ -46,6 +74,63 @@ REPLY_CLASSES = [
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# ====================
+# HELPER FUNCTIONS: Email Utilities
+# ====================
+
+def html_to_plain_text(html):
+    """Convert HTML email to plain text."""
+    from bs4 import BeautifulSoup
+
+    # Remove scripts and styles
+    soup = BeautifulSoup(html, 'html.parser')
+    for script in soup(["script", "style"]):
+        script.extract()
+
+    # Get text
+    text = soup.get_text()
+
+    # Break into lines and remove leading/trailing space
+    lines = (line.strip() for line in text.splitlines())
+
+    # Break multi-headlines into a line each
+    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+
+    # Drop blank lines
+    text = '\n'.join(chunk for chunk in chunks if chunk)
+
+    return text
+
+
+def send_via_sendgrid(to_email, from_email, from_name, subject, html_body, plain_body=None):
+    """Send email via SendGrid API."""
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail, Email, To, Content
+
+    try:
+        sg = SendGridAPIClient(api_key=Config.SENDGRID_API_KEY)
+
+        # Build email
+        mail = Mail(
+            from_email=Email(from_email, from_name),
+            to_emails=To(to_email),
+            subject=subject,
+            html_content=Content("text/html", html_body)
+        )
+
+        # Add plain text version if provided
+        if plain_body:
+            mail.add_content(Content("text/plain", plain_body))
+
+        # Send email
+        response = sg.client.mail.send.post(request_body=mail.get())
+
+        return response.status_code == 202
+    except Exception as e:
+        logger.error(f"SendGrid error: {e}")
+        return False
 
 
 def add_cors_headers(response):
@@ -141,6 +226,164 @@ def safe_value(value):
     return value
 
 
+def normalize_locations(locations) -> list[str]:
+    if not locations:
+        return []
+    if isinstance(locations, list):
+        output = []
+        for item in locations:
+            if isinstance(item, dict):
+                city = normalize_scoring_text(item.get("city", ""))
+                state = normalize_scoring_text(item.get("state", ""))
+                if city and state:
+                    output.append(f"{city}, {state}")
+                elif city or state:
+                    output.append(city or state)
+            else:
+                output.append(str(item))
+        return [loc for loc in output if loc]
+    return [str(locations)]
+
+
+def parse_apollo_search_person(person: dict) -> tuple[dict, dict]:
+    org = person.get("organization") or person.get("company") or {}
+    org_id = org.get("id") or person.get("organization_id") or person.get("org_id") or ""
+    org_domain = org.get("primary_domain") or org.get("domain") or person.get("organization_domain") or ""
+    org_name = org.get("name") or person.get("organization_name") or ""
+
+    company_record = {
+        "apollo_org_id": org_id,
+        "company_id": org_id,
+        "name": org_name,
+        "domain": org_domain,
+        "industry": org.get("industry", "") or person.get("industry", ""),
+        "employee_count": org.get("estimated_num_employees", 0) or org.get("employee_count", 0),
+        "estimated_revenue": org.get("estimated_annual_revenue", ""),
+        "technologies": [tech.get("name") for tech in org.get("technologies", [])] if org.get("technologies") else [],
+        "wms_system": "",
+        "equipment_signals": [],
+        "job_postings_count": org.get("current_job_openings_count", 0) or 0,
+        "job_postings_relevant": 0,
+        "locations": normalize_locations(org.get("locations", [])),
+        "controls_roles_hiring": False
+    }
+
+    departments = person.get("departments") or []
+    department = departments[0] if isinstance(departments, list) and departments else person.get("department", "")
+    person_record = {
+        "apollo_person_id": person.get("id") or person.get("person_id") or "",
+        "first_name": person.get("first_name", ""),
+        "last_name": person.get("last_name", ""),
+        "title": person.get("title", ""),
+        "seniority": person.get("seniority", ""),
+        "department": department,
+        "email": person.get("email", ""),
+        "email_status": person.get("email_status", ""),
+        "phone": "",
+        "linkedin_url": person.get("linkedin_url", ""),
+        "job_start_date": person.get("job_start_date", ""),
+        "company_domain": org_domain
+    }
+
+    return person_record, company_record
+
+
+def parse_apollo_person_response(person: dict) -> tuple[dict, dict]:
+    org = person.get("organization") or {}
+    company_record = {
+        "apollo_org_id": org.get("id", ""),
+        "company_id": org.get("id", ""),
+        "name": org.get("name", ""),
+        "domain": org.get("primary_domain", ""),
+        "industry": org.get("industry", ""),
+        "employee_count": org.get("estimated_num_employees", 0),
+        "estimated_revenue": org.get("estimated_annual_revenue", ""),
+        "technologies": [tech.get("name") for tech in org.get("technologies", [])] if org.get("technologies") else [],
+        "wms_system": "",
+        "equipment_signals": [],
+        "job_postings_count": org.get("current_job_openings_count", 0) or 0,
+        "job_postings_relevant": 0,
+        "locations": normalize_locations(org.get("locations", []))
+    }
+
+    departments = person.get("departments") or []
+    department = departments[0] if isinstance(departments, list) and departments else person.get("department", "")
+    person_record = {
+        "apollo_person_id": person.get("id", ""),
+        "first_name": person.get("first_name", ""),
+        "last_name": person.get("last_name", ""),
+        "title": person.get("title", ""),
+        "seniority": person.get("seniority", ""),
+        "department": department,
+        "email": person.get("email", ""),
+        "email_status": person.get("email_status", ""),
+        "phone": person.get("phone_numbers", [{}])[0].get("raw_number", "") if person.get("phone_numbers") else "",
+        "linkedin_url": person.get("linkedin_url", ""),
+        "job_start_date": person.get("job_start_date", ""),
+        "company_domain": org.get("primary_domain", "")
+    }
+
+    return person_record, company_record
+
+
+def person_enrichment_needed(person_row: dict) -> bool:
+    if not person_row:
+        return True
+    email_norm = person_row.get("email_norm") or ""
+    email_status = normalize_scoring_text(person_row.get("email_status", ""))
+    if email_norm and email_status == "verified":
+        return False
+    enriched_at = parse_timestamp(person_row.get("enriched_at", ""))
+    if enriched_at:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=Config.APOLLO_PERSON_TTL_DAYS)
+        if enriched_at >= cutoff and email_norm:
+            return False
+    return True
+
+
+def company_enrichment_needed(company_row: dict) -> bool:
+    if not company_row:
+        return True
+    enriched_at = parse_timestamp(company_row.get("enriched_at", ""))
+    if not enriched_at:
+        return True
+    cutoff = datetime.now(timezone.utc) - timedelta(days=Config.APOLLO_COMPANY_TTL_DAYS)
+    return enriched_at < cutoff
+
+
+def build_credit_estimate(payload: dict) -> dict:
+    def read_float(key, default=0.0):
+        try:
+            return float(payload.get(key, default))
+        except (TypeError, ValueError):
+            return float(default)
+
+    l = read_float("L")
+    a = read_float("A")
+    e = read_float("E")
+    p = read_float("P")
+    r = read_float("R")
+    d = read_float("D")
+    ce = read_float("Ce")
+    cp = read_float("Cp")
+    cr = read_float("Cr")
+
+    n = l * a * (1 - d)
+    email_credits = n * e * ce
+    mobile_credits = n * p * cp
+    enrichment_credits = n * r * cr
+    total = n * (e * ce + p * cp + r * cr)
+
+    return {
+        "inputs": {"L": l, "A": a, "E": e, "P": p, "R": r, "D": d, "Ce": ce, "Cp": cp, "Cr": cr},
+        "net_new": n,
+        "email_credits": email_credits,
+        "mobile_credits": mobile_credits,
+        "enrichment_credits": enrichment_credits,
+        "total": total
+    }
+
+
 def get_request_json() -> dict:
     try:
         payload = request.get_json(silent=True)
@@ -212,6 +455,16 @@ def append_event(event: dict) -> dict:
     event["timestamp"] = event.get("timestamp") or utc_now()
     events.append(event)
     save_events(events)
+    if event.get("event_type") == "email_sent":
+        recipient_email = event.get("recipient_email", "")
+        person = get_person_by_email(recipient_email)
+        if person:
+            log_outreach(
+                person.get("person_key", ""),
+                event.get("campaign_id", ""),
+                int(event.get("email_sequence") or 1),
+                "sent"
+            )
     return event
 
 
@@ -495,6 +748,7 @@ def campaigns():
                 "id": campaign_id,
                 "name": name,
                 "status": payload.get("status", "draft"),
+                "strategy": payload.get("strategy", "conventional"),  # NEW: conventional, semi_auto, full_auto
                 "lead_source": payload.get("lead_source", ""),
                 "output_file": payload.get("output_file", "")
             }
@@ -647,11 +901,13 @@ def campaign_generate(campaign_id: str):
     output_path = OUTPUT_DIR / secure_filename(output_name)
 
     try:
+        strategy = campaign.get("strategy", "conventional")
         generate_campaigns(
             str(input_path),
             str(output_path),
             limit=int(limit) if limit else None,
             raise_on_error=True,
+            strategy=strategy
         )
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -670,6 +926,542 @@ def campaign_generate(campaign_id: str):
 
     save_json(data)
     return jsonify({"output_file": campaign["output_file"], "stats": campaign.get("stats", {})})
+
+
+@app.route("/api/campaigns/<campaign_id>/enrich", methods=["POST"])
+def campaign_enrich(campaign_id: str):
+    """
+    Enrich leads with Apollo.io data
+
+    Request body:
+    {
+        "fields": ["person", "company", "job_postings", "intent_score"]
+    }
+
+    Returns:
+    {
+        "enriched_count": int,
+        "failed_count": int,
+        "new_columns": list[str],
+        "enriched_file": str
+    }
+    """
+    data = load_json()
+    campaign = find_campaign(data, campaign_id)
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+
+    payload = get_request_json()
+    enrichment_fields = payload.get("fields", ["person", "company", "intent_score"])
+
+    # Get source CSV path
+    source_path = campaign.get("lead_source")
+    if not source_path:
+        return jsonify({"error": "No lead source uploaded"}), 400
+
+    csv_path = BASE_DIR / source_path
+    if not csv_path.exists():
+        return jsonify({"error": "Lead source file not found"}), 404
+
+    # Load CSV
+    import pandas as pd
+    df = pd.read_csv(csv_path)
+
+    # Initialize Apollo client
+    try:
+        from apollo_enrichment import (
+            ApolloEnricher,
+            detect_wms_system,
+            detect_equipment_signals
+        )
+        enricher = ApolloEnricher()
+    except Exception as e:
+        return jsonify({"error": f"Failed to initialize Apollo client: {str(e)}"}), 500
+
+    enriched_count = 0
+    failed_count = 0
+
+    # Add enrichment columns
+    df["apollo_title"] = ""
+    df["apollo_seniority"] = ""
+    df["apollo_email_status"] = ""
+    df["apollo_phone"] = ""
+    df["employee_count"] = 0
+    df["estimated_revenue"] = ""
+    df["technologies"] = ""
+    df["wms_system"] = ""
+    df["equipment_signals"] = ""
+    df["job_postings_count"] = 0
+    df["job_postings_relevant"] = 0
+    df["intent_score"] = 0.0
+
+    logger.info(f"Starting Apollo enrichment for {len(df)} leads...")
+
+    for idx, row in df.iterrows():
+        try:
+            email = row.get("Email address", "")
+            company = row.get("Company", "")
+            full_name = row.get("Full name", "")
+
+            # Parse name
+            name_parts = str(full_name).split()
+            first_name = name_parts[0] if name_parts else ""
+            last_name = name_parts[-1] if len(name_parts) > 1 else ""
+
+            person_data = {}
+            company_data = {}
+            job_postings = []
+
+            # Enrich person
+            if "person" in enrichment_fields:
+                person_data = enricher.enrich_person(email, first_name, last_name, company) or {}
+                if person_data:
+                    df.at[idx, "apollo_title"] = person_data.get("title", "")
+                    df.at[idx, "apollo_seniority"] = person_data.get("seniority", "")
+                    df.at[idx, "apollo_email_status"] = person_data.get("email_status", "")
+                    df.at[idx, "apollo_phone"] = person_data.get("phone", "")
+
+            # Enrich company
+            if "company" in enrichment_fields:
+                # Try to get domain from email
+                domain = email.split("@")[1] if "@" in email else None
+                company_data = enricher.enrich_company(company_name=company, domain=domain) or {}
+
+                if company_data:
+                    df.at[idx, "employee_count"] = company_data.get("employee_count", 0)
+                    df.at[idx, "estimated_revenue"] = company_data.get("estimated_revenue", "")
+                    technologies = company_data.get("technologies", [])
+                    df.at[idx, "technologies"] = ", ".join(technologies)
+                    df.at[idx, "wms_system"] = detect_wms_system(technologies)
+                    df.at[idx, "equipment_signals"] = ", ".join(detect_equipment_signals(
+                        technologies,
+                        company_data.get("seo_description", "")
+                    ))
+                    df.at[idx, "job_postings_count"] = company_data.get("current_job_openings_count", 0)
+
+            # Get job postings (intent signal)
+            if "job_postings" in enrichment_fields and company_data.get("company_id"):
+                job_postings = enricher.get_company_job_postings(company_data["company_id"])
+                # Count relevant job postings
+                warehouse_keywords = ['warehouse', 'distribution', 'supply chain', 'logistics',
+                                    'automation', 'controls', 'engineering']
+                relevant_jobs = [
+                    job for job in job_postings
+                    if any(kw in job.get('title', '').lower() for kw in warehouse_keywords)
+                ]
+                df.at[idx, "job_postings_relevant"] = len(relevant_jobs)
+
+            # Calculate intent score
+            if "intent_score" in enrichment_fields:
+                intent_score = calculate_intent_score(person_data, company_data, job_postings)
+                df.at[idx, "intent_score"] = round(intent_score, 2)
+
+            enriched_count += 1
+            logger.info(f"Enriched {enriched_count}/{len(df)}: {email}")
+
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Failed to enrich {email}: {e}")
+            continue
+
+    # Save enriched CSV
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    original_filename = Path(source_path).stem
+    enriched_filename = f"{timestamp}_{original_filename}_enriched.csv"
+    enriched_path = UPLOAD_DIR / enriched_filename
+    df.to_csv(enriched_path, index=False)
+
+    # Update campaign with enriched file
+    campaign["lead_source"] = relative_path(enriched_path)
+    save_json(data)
+
+    logger.info(f"Enrichment complete: {enriched_count} enriched, {failed_count} failed")
+
+    return jsonify({
+        "enriched_count": enriched_count,
+        "failed_count": failed_count,
+        "new_columns": [
+            "apollo_title", "apollo_seniority", "employee_count", "estimated_revenue",
+            "technologies", "wms_system", "equipment_signals", "intent_score"
+        ],
+        "enriched_file": str(enriched_path)
+    })
+
+
+@app.route("/api/apollo/search", methods=["POST"])
+def apollo_search():
+    payload = get_request_json()
+    campaign_id = payload.get("campaign_id", "")
+    search_payload = payload.get("search", {})
+    min_icp_score = int(payload.get("min_icp_score", 1))
+    allow_phone = bool(payload.get("allow_phone", False))
+    allow_personal_emails = bool(payload.get("allow_personal_emails", False))
+
+    if not search_payload:
+        return jsonify({"error": "search payload is required"}), 400
+
+    try:
+        from apollo_enrichment import ApolloEnricher
+        enricher = ApolloEnricher()
+    except Exception as e:
+        return jsonify({"error": f"Failed to initialize Apollo client: {str(e)}"}), 500
+
+    people = enricher.search_people(search_payload)
+    stats = {
+        "discovered": len(people),
+        "accepted": 0,
+        "queued": 0,
+        "skipped": 0,
+        "suppressed": 0,
+        "rejected": 0
+    }
+
+    for person in people:
+        person_record, company_record = parse_apollo_search_person(person)
+        company_key = upsert_company(company_record)
+        person_record["company_key"] = company_key
+        person_record["company_domain"] = company_record.get("domain", "")
+
+        features = extract_features(person_record, company_record)
+        icp_match, icp_score, _ = score_icp(features)
+        readiness_score = compute_automation_readiness(features)
+        strategy_assignment = assign_strategy(icp_match, readiness_score)
+
+        person_record.update(
+            {
+                "icp_match": icp_match,
+                "icp_score": icp_score,
+                "readiness_score": readiness_score,
+                "strategy_assignment": strategy_assignment,
+                "source": "apollo_search"
+            }
+        )
+
+        person_key = upsert_person(person_record)
+        person_row = get_person_by_key(person_key) or {}
+
+        if icp_score < min_icp_score:
+            insert_queue_record(
+                person_key,
+                campaign_id,
+                "rejected",
+                "",
+                False,
+                False,
+                note="icp_score_below_threshold"
+            )
+            stats["rejected"] += 1
+            continue
+
+        stats["accepted"] += 1
+
+        if is_suppressed(person_key):
+            insert_queue_record(
+                person_key,
+                campaign_id,
+                "suppressed",
+                "",
+                False,
+                False,
+                note="suppression_window"
+            )
+            stats["suppressed"] += 1
+            continue
+
+        needs_enrichment = person_enrichment_needed(person_row)
+        reveal_phone_number = bool(allow_phone and icp_match in {"ICP 4", "ICP 5"})
+        request_hash = calculate_enrichment_hash(person_key, allow_personal_emails, reveal_phone_number)
+
+        if not needs_enrichment:
+            insert_queue_record(
+                person_key,
+                campaign_id,
+                "skipped",
+                request_hash,
+                allow_personal_emails,
+                reveal_phone_number,
+                note="already_enriched"
+            )
+            stats["skipped"] += 1
+            continue
+
+        if recent_request_hash(person_key, request_hash, Config.APOLLO_PERSON_TTL_DAYS):
+            insert_queue_record(
+                person_key,
+                campaign_id,
+                "skipped",
+                request_hash,
+                allow_personal_emails,
+                reveal_phone_number,
+                note="recent_request"
+            )
+            stats["skipped"] += 1
+            continue
+
+        enqueue_enrichment(
+            person_key,
+            campaign_id,
+            request_hash,
+            allow_personal_emails,
+            reveal_phone_number,
+            note="queued_for_enrichment"
+        )
+        stats["queued"] += 1
+
+    return jsonify(stats)
+
+
+@app.route("/api/apollo/queue", methods=["GET"])
+def apollo_queue():
+    campaign_id = request.args.get("campaign_id", "")
+    status = request.args.get("status")
+    limit = int(request.args.get("limit", 50))
+    summary = get_queue_summary(campaign_id)
+    items = get_queue_items(status, limit) if status else []
+    return jsonify({"summary": summary, "items": items})
+
+
+@app.route("/api/apollo/queue/process", methods=["POST"])
+def apollo_queue_process():
+    payload = get_request_json()
+    limit = int(payload.get("limit", Config.APOLLO_BULK_MATCH_SIZE))
+    include_job_postings = bool(payload.get("include_job_postings", False))
+
+    try:
+        from apollo_enrichment import (
+            ApolloEnricher,
+            calculate_intent_score,
+            detect_wms_system,
+            detect_equipment_signals
+        )
+        enricher = ApolloEnricher()
+    except Exception as e:
+        return jsonify({"error": f"Failed to initialize Apollo client: {str(e)}"}), 500
+
+    items = get_queue_items("queued", limit)
+    if not items:
+        return jsonify({"processed": 0, "message": "No queued records"}), 200
+
+    processed = 0
+    failed = 0
+
+    grouped = {}
+    for item in items:
+        key = (item.get("reveal_personal_emails", 0), item.get("reveal_phone_number", 0))
+        grouped.setdefault(key, []).append(item)
+
+    for (reveal_personal, reveal_phone), group_items in grouped.items():
+        for i in range(0, len(group_items), Config.APOLLO_BULK_MATCH_SIZE):
+            batch = group_items[i:i + Config.APOLLO_BULK_MATCH_SIZE]
+            details = []
+            item_lookup = {}
+
+            for item in batch:
+                person_row = get_person_by_key(item.get("person_key"))
+                if not person_row:
+                    update_queue_status(item["id"], "failed", "missing_person")
+                    failed += 1
+                    continue
+                company_row = get_company_by_key(person_row.get("company_key", ""))
+                details.append(
+                    {
+                        "email": person_row.get("email", ""),
+                        "first_name": person_row.get("first_name", ""),
+                        "last_name": person_row.get("last_name", ""),
+                        "organization_name": company_row.get("name", "") if company_row else "",
+                        "domain": company_row.get("domain_norm", "") if company_row else "",
+                        "linkedin_url": person_row.get("linkedin_url_norm", ""),
+                        "person_id": person_row.get("apollo_person_id", "")
+                    }
+                )
+                item_lookup[item["id"]] = {"person": person_row, "company": company_row, "queue": item}
+
+            if not details:
+                continue
+
+            response_people = enricher.bulk_enrich_people(
+                details,
+                reveal_personal_emails=bool(reveal_personal),
+                reveal_phone_number=bool(reveal_phone)
+            )
+
+            response_by_id = {}
+            response_by_email = {}
+            response_by_linkedin = {}
+            for person in response_people:
+                person_id = person.get("id")
+                if person_id:
+                    response_by_id[str(person_id)] = person
+                email_norm = normalize_scoring_text(person.get("email", ""))
+                if email_norm:
+                    response_by_email[email_norm] = person
+                linkedin_norm = normalize_scoring_text(person.get("linkedin_url", ""))
+                if linkedin_norm:
+                    response_by_linkedin[linkedin_norm] = person
+
+            for entry in item_lookup.values():
+                person_row = entry["person"]
+                company_row = entry["company"] or {}
+                queue_item = entry["queue"]
+
+                match = None
+                if person_row.get("apollo_person_id"):
+                    match = response_by_id.get(str(person_row.get("apollo_person_id")))
+                if not match and person_row.get("email_norm"):
+                    match = response_by_email.get(person_row.get("email_norm"))
+                if not match and person_row.get("linkedin_url_norm"):
+                    match = response_by_linkedin.get(person_row.get("linkedin_url_norm"))
+
+                if not match:
+                    update_queue_status(queue_item["id"], "failed", "no_match")
+                    failed += 1
+                    continue
+
+                person_update, company_update = parse_apollo_person_response(match)
+                company_payload = {}
+                if company_row:
+                    company_payload = {
+                        "apollo_org_id": company_row.get("apollo_org_id", ""),
+                        "company_id": company_row.get("apollo_org_id", ""),
+                        "name": company_row.get("name", ""),
+                        "domain": company_row.get("domain_norm", ""),
+                        "industry": company_row.get("industry", ""),
+                        "employee_count": company_row.get("employee_count", 0),
+                        "estimated_revenue": company_row.get("estimated_revenue", ""),
+                        "technologies": [item.strip() for item in str(company_row.get("technologies", "")).split(",") if item.strip()],
+                        "wms_system": company_row.get("wms_system", ""),
+                        "equipment_signals": [item.strip() for item in str(company_row.get("equipment_signals", "")).split(",") if item.strip()],
+                        "job_postings_count": company_row.get("job_postings_count", 0),
+                        "job_postings_relevant": company_row.get("job_postings_relevant", 0),
+                        "locations": [item.strip() for item in str(company_row.get("locations", "")).split(",") if item.strip()],
+                        "enriched_at": company_row.get("enriched_at")
+                    }
+                company_payload.update(company_update)
+
+                if company_enrichment_needed(company_row):
+                    enriched_company = enricher.enrich_company(
+                        company_name=company_update.get("name") or company_row.get("name"),
+                        domain=company_update.get("domain") or company_row.get("domain_norm")
+                    ) or {}
+                    if enriched_company:
+                        company_payload.update(
+                            {
+                                "apollo_org_id": enriched_company.get("company_id", ""),
+                                "company_id": enriched_company.get("company_id", ""),
+                                "name": enriched_company.get("name", "") or company_payload.get("name", ""),
+                                "domain": enriched_company.get("domain", "") or company_payload.get("domain", ""),
+                                "industry": enriched_company.get("industry", "") or company_payload.get("industry", ""),
+                                "employee_count": enriched_company.get("employee_count", 0) or company_payload.get("employee_count", 0),
+                                "estimated_revenue": enriched_company.get("estimated_revenue", ""),
+                                "technologies": enriched_company.get("technologies", []),
+                                "job_postings_count": enriched_company.get("current_job_openings_count", 0),
+                                "enriched_at": utc_now()
+                            }
+                        )
+
+                        if include_job_postings and enriched_company.get("company_id"):
+                            job_postings = enricher.get_company_job_postings(enriched_company["company_id"])
+                            warehouse_keywords = ['warehouse', 'distribution', 'supply chain', 'logistics',
+                                                'automation', 'controls', 'engineering']
+                            relevant_jobs = [
+                                job for job in job_postings
+                                if any(kw in job.get('title', '').lower() for kw in warehouse_keywords)
+                            ]
+                            company_payload["job_postings_relevant"] = len(relevant_jobs)
+                            company_payload["controls_roles_hiring"] = any(
+                                "controls" in job.get("title", "").lower() for job in job_postings
+                            )
+
+                technologies = company_payload.get("technologies", [])
+                company_payload["wms_system"] = detect_wms_system(technologies)
+                company_payload["equipment_signals"] = detect_equipment_signals(
+                    technologies,
+                    ""
+                )
+
+                company_key = upsert_company(company_payload)
+
+                person_payload = {}
+                person_payload.update(person_update)
+                person_payload["company_key"] = company_key
+                person_payload["company_domain"] = company_payload.get("domain", "")
+                person_payload["enriched_at"] = utc_now()
+                person_payload["enrichment_request_hash"] = queue_item.get("request_hash", "")
+
+                features = extract_features(person_payload, company_payload)
+                icp_match, icp_score, _ = score_icp(features)
+                readiness_score = compute_automation_readiness(features)
+                strategy_assignment = assign_strategy(icp_match, readiness_score)
+
+                person_payload.update(
+                    {
+                        "icp_match": icp_match,
+                        "icp_score": icp_score,
+                        "readiness_score": readiness_score,
+                        "strategy_assignment": strategy_assignment
+                    }
+                )
+
+                upsert_person(person_payload)
+                update_queue_status(queue_item["id"], "enriched")
+                processed += 1
+
+    return jsonify({"processed": processed, "failed": failed})
+
+
+@app.route("/api/apollo/credit-estimate", methods=["POST"])
+def apollo_credit_estimate():
+    payload = get_request_json()
+    return jsonify(build_credit_estimate(payload))
+
+
+@app.route("/api/campaigns/<campaign_id>/apollo/export", methods=["POST"])
+def campaign_apollo_export(campaign_id: str):
+    data = load_json()
+    campaign = find_campaign(data, campaign_id)
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+
+    leads = get_people_for_campaign(campaign_id)
+    if not leads:
+        return jsonify({"error": "No enriched leads available for export"}), 400
+
+    rows = []
+    for lead in leads:
+        full_name = " ".join([lead.get("first_name", ""), lead.get("last_name", "")]).strip()
+        rows.append(
+            {
+                "Company": lead.get("company_name", ""),
+                "Industry": lead.get("company_industry", ""),
+                "Email address": lead.get("email", ""),
+                "Full name": full_name,
+                "Job title": lead.get("title", ""),
+                "ICP Match": lead.get("icp_match", ""),
+                "Notes": "",
+                "Equipment": lead.get("equipment_signals", ""),
+                "strategy_assignment": lead.get("strategy_assignment", ""),
+                "employee_count": lead.get("employee_count", 0),
+                "technologies": lead.get("technologies", ""),
+                "wms_system": lead.get("wms_system", ""),
+                "job_postings_relevant": lead.get("job_postings_relevant", 0)
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    export_filename = f"{timestamp}_apollo_campaign_{campaign_id}.csv"
+    export_path = UPLOAD_DIR / export_filename
+    df.to_csv(export_path, index=False)
+
+    campaign["lead_source"] = relative_path(export_path)
+    save_json(data)
+
+    return jsonify(
+        {
+            "lead_source": campaign["lead_source"],
+            "row_count": len(df)
+        }
+    )
 
 
 @app.route("/api/events", methods=["GET", "POST"])
@@ -937,6 +1729,232 @@ def apply_event_to_bucket(bucket: dict, event: dict, positive_classes: set[str])
             bucket["successful"] += 1
 
 
+def compute_response_latencies(events_list: list[dict]) -> list[float]:
+    sent_times: dict[str, datetime] = {}
+    latencies: list[float] = []
+
+    for event in events_list:
+        event_type = event.get("event_type")
+        recipient = event.get("recipient_email", "")
+        sequence = event.get("email_sequence", "")
+        key = f"{recipient}|{sequence}"
+
+        if event_type == "email_sent":
+            timestamp = parse_timestamp(event.get("timestamp", ""))
+            if timestamp:
+                sent_times[key] = timestamp
+
+        if event_type == "email_replied":
+            timestamp = parse_timestamp(event.get("timestamp", ""))
+            if timestamp and key in sent_times:
+                delta = timestamp - sent_times[key]
+                latencies.append(delta.total_seconds() / 3600)
+
+    return latencies
+
+
+def build_strategy_rollup() -> dict:
+    return {
+        "sent": 0,
+        "delivered": 0,
+        "opened": 0,
+        "replied": 0,
+        "successful": 0,
+        "bounced": 0,
+        "unsubscribed": 0,
+        "intent_sum": 0.0,
+        "intent_count": 0,
+        "latencies": []
+    }
+
+
+def regularized_gamma_q(a: float, x: float, eps: float = 1e-12, max_iter: int = 200) -> float:
+    if x <= 0 or a <= 0:
+        return 1.0
+
+    if x < a + 1.0:
+        ap = a
+        sum_value = 1.0 / a
+        delta = sum_value
+        for _ in range(max_iter):
+            ap += 1.0
+            delta *= x / ap
+            sum_value += delta
+            if abs(delta) < abs(sum_value) * eps:
+                break
+        p = sum_value * math.exp(-x + a * math.log(x) - math.lgamma(a))
+        return max(0.0, min(1.0, 1.0 - p))
+
+    b = x + 1.0 - a
+    c = 1.0 / 1e-30
+    d = 1.0 / b
+    h = d
+    for i in range(1, max_iter + 1):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < 1e-30:
+            d = 1e-30
+        c = b + an / c
+        if abs(c) < 1e-30:
+            c = 1e-30
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < eps:
+            break
+
+    q = math.exp(-x + a * math.log(x) - math.lgamma(a)) * h
+    return max(0.0, min(1.0, q))
+
+
+def chi_square_p_value(statistic: float, df: int) -> float | None:
+    if df <= 0 or statistic < 0:
+        return None
+    return regularized_gamma_q(df / 2.0, statistic / 2.0)
+
+
+def calculate_strategy_comparison() -> dict:
+    data = load_json()
+    campaigns = data.get("campaigns", [])
+    campaign_map = {c.get("id"): c for c in campaigns if c.get("id")}
+
+    events_list = load_events()
+    replies_list = load_replies()
+
+    events_by_campaign: dict[str, list[dict]] = {}
+    for event in events_list:
+        campaign_id = event.get("campaign_id")
+        if not campaign_id or campaign_id not in campaign_map:
+            continue
+        events_by_campaign.setdefault(campaign_id, []).append(event)
+
+    replies_by_campaign: dict[str, list[dict]] = {}
+    for reply in replies_list:
+        campaign_id = reply.get("campaign_id")
+        if not campaign_id or campaign_id not in campaign_map:
+            continue
+        replies_by_campaign.setdefault(campaign_id, []).append(reply)
+
+    positive_classes = {"Positive interest", "Soft interest"}
+    strategy_rollups: dict[str, dict] = {}
+    strategy_campaigns: dict[str, int] = {}
+
+    for campaign in campaigns:
+        campaign_id = campaign.get("id")
+        if not campaign_id:
+            continue
+        strategy = campaign.get("strategy", "conventional")
+        rollup = strategy_rollups.setdefault(strategy, build_strategy_rollup())
+        strategy_campaigns[strategy] = strategy_campaigns.get(strategy, 0) + 1
+
+        counters = initialize_breakdown()
+        campaign_events = events_by_campaign.get(campaign_id, [])
+        for event in campaign_events:
+            apply_event_to_bucket(counters, event, positive_classes)
+
+        for key in ["sent", "delivered", "opened", "replied", "successful", "bounced", "unsubscribed"]:
+            rollup[key] += counters[key]
+
+        rollup["latencies"].extend(compute_response_latencies(campaign_events))
+
+        for reply in replies_by_campaign.get(campaign_id, []):
+            try:
+                rollup["intent_sum"] += float(reply.get("intent_score", 0) or 0)
+                rollup["intent_count"] += 1
+            except (TypeError, ValueError):
+                continue
+
+    for strategy in ("conventional", "semi_auto", "full_auto"):
+        strategy_rollups.setdefault(strategy, build_strategy_rollup())
+        strategy_campaigns.setdefault(strategy, 0)
+
+    strategies = {}
+    for strategy, rollup in strategy_rollups.items():
+        base = rollup["delivered"] or rollup["sent"]
+        reply_rate = rollup["replied"] / base if base else 0
+        positive_rate = rollup["successful"] / rollup["replied"] if rollup["replied"] else 0
+        avg_intent = (
+            rollup["intent_sum"] / rollup["intent_count"] if rollup["intent_count"] else 0
+        )
+        latencies = rollup["latencies"]
+        avg_response_hours = sum(latencies) / len(latencies) if latencies else 0
+
+        strategies[strategy] = {
+            "campaigns": strategy_campaigns.get(strategy, 0),
+            "sent": rollup["sent"],
+            "delivered": rollup["delivered"],
+            "replied": rollup["replied"],
+            "successful": rollup["successful"],
+            "reply_rate": reply_rate,
+            "positive_rate": positive_rate,
+            "avg_intent": avg_intent,
+            "avg_response_hours": avg_response_hours,
+            "base": base
+        }
+
+    eligible = [
+        (strategy, data)
+        for strategy, data in strategies.items()
+        if data.get("base", 0) > 0
+    ]
+
+    chi_square = {
+        "statistic": None,
+        "p_value": None,
+        "df": None,
+        "alpha": 0.05,
+        "significant": False,
+        "eligible_strategies": [strategy for strategy, _ in eligible],
+        "note": ""
+    }
+
+    if len(eligible) >= 2:
+        replied_counts = [data.get("replied", 0) for _, data in eligible]
+        non_replied_counts = [
+            max(0, data.get("base", 0) - data.get("replied", 0)) for _, data in eligible
+        ]
+        row_totals = [sum(replied_counts), sum(non_replied_counts)]
+        grand_total = sum(row_totals)
+        if grand_total > 0:
+            chi2 = 0.0
+            for col_idx in range(len(eligible)):
+                col_total = replied_counts[col_idx] + non_replied_counts[col_idx]
+                if col_total == 0:
+                    continue
+                expected_replied = row_totals[0] * col_total / grand_total
+                expected_non_replied = row_totals[1] * col_total / grand_total
+                if expected_replied > 0:
+                    chi2 += (replied_counts[col_idx] - expected_replied) ** 2 / expected_replied
+                if expected_non_replied > 0:
+                    chi2 += (
+                        (non_replied_counts[col_idx] - expected_non_replied) ** 2
+                        / expected_non_replied
+                    )
+
+            df = len(eligible) - 1
+            p_value = chi_square_p_value(chi2, df)
+            chi_square.update(
+                {
+                    "statistic": chi2,
+                    "p_value": p_value,
+                    "df": df,
+                    "significant": bool(p_value is not None and p_value < chi_square["alpha"])
+                }
+            )
+        else:
+            chi_square["note"] = "Not enough delivered volume for comparison."
+    else:
+        chi_square["note"] = "Need at least two strategies with delivered volume."
+
+    return {"strategies": strategies, "chi_square": chi_square}
+
+
+@app.route("/api/metrics/strategy-comparison")
+def strategy_comparison_metrics():
+    return jsonify(calculate_strategy_comparison())
+
+
 @app.route("/api/metrics")
 def metrics():
     campaign_id = request.args.get("campaign_id")
@@ -1140,6 +2158,510 @@ def senders():
             }
         )
     return jsonify(sender_list)
+
+
+# ====================
+# NEW ENDPOINTS: Signature Management
+# ====================
+
+@app.route("/api/signatures", methods=["GET"])
+def get_signatures():
+    """List all signatures."""
+    from signature_manager import get_all_signatures
+
+    signatures = get_all_signatures()
+    return jsonify({"signatures": signatures})
+
+
+@app.route("/api/signatures/import", methods=["POST"])
+def import_signatures():
+    """Import signatures from Outlook."""
+    from signature_manager import import_outlook_signatures
+
+    try:
+        imported_ids = import_outlook_signatures()
+        return jsonify({
+            "status": "success",
+            "count": len(imported_ids),
+            "signature_ids": imported_ids
+        })
+    except Exception as e:
+        logger.error(f"Signature import failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/signatures/<signature_id>", methods=["GET"])
+def get_signature(signature_id):
+    """Get signature by ID."""
+    from signature_manager import get_signature
+
+    signature = get_signature(signature_id)
+    if signature:
+        return jsonify(signature)
+    else:
+        return jsonify({"error": "Signature not found"}), 404
+
+
+@app.route("/api/signatures/<signature_id>", methods=["PUT"])
+def update_signature(signature_id):
+    """Update signature."""
+    from signature_manager import update_signature
+
+    data = request.json
+    try:
+        update_signature(
+            signature_id,
+            name=data.get("name"),
+            html_content=data.get("html_content"),
+            plain_text_content=data.get("plain_text_content"),
+            is_default=data.get("is_default")
+        )
+        return jsonify({"status": "updated"})
+    except Exception as e:
+        logger.error(f"Signature update failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/signatures/<signature_id>", methods=["DELETE"])
+def delete_signature(signature_id):
+    """Delete signature."""
+    from signature_manager import delete_signature
+
+    try:
+        delete_signature(signature_id)
+        return jsonify({"status": "deleted"})
+    except Exception as e:
+        logger.error(f"Signature deletion failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ====================
+# NEW ENDPOINTS: Sequence Management
+# ====================
+
+@app.route("/api/campaigns/<campaign_id>/sequence", methods=["GET"])
+def get_campaign_sequence(campaign_id):
+    """Load sequence for a campaign."""
+    from sequence_engine import load_sequence_by_campaign
+
+    sequence = load_sequence_by_campaign(campaign_id)
+    if sequence:
+        return jsonify(sequence)
+    else:
+        return jsonify({"steps": []})
+
+
+@app.route("/api/campaigns/<campaign_id>/sequence", methods=["PUT"])
+def save_campaign_sequence(campaign_id):
+    """Save sequence for a campaign."""
+    from sequence_engine import create_sequence, load_sequence_by_campaign
+
+    data = request.json
+    steps = data.get("steps", [])
+    name = data.get("name", f"Sequence for {campaign_id}")
+
+    try:
+        # Check if sequence exists
+        existing = load_sequence_by_campaign(campaign_id)
+
+        if existing:
+            # Update existing sequence
+            from lead_registry import get_connection, utc_now
+            conn = get_connection()
+            conn.execute("""
+                UPDATE sequences
+                SET steps = ?, name = ?, updated_at = ?
+                WHERE id = ?
+            """, (json.dumps(steps), name, utc_now(), existing['id']))
+            conn.close()
+            sequence_id = existing['id']
+        else:
+            # Create new sequence
+            sequence_id = create_sequence(campaign_id, name, steps)
+
+        return jsonify({"status": "saved", "sequence_id": sequence_id})
+    except Exception as e:
+        logger.error(f"Sequence save failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/campaigns/<campaign_id>/sequence/enroll", methods=["POST"])
+def enroll_leads_in_sequence(campaign_id):
+    """Enroll leads in a campaign sequence."""
+    from sequence_engine import load_sequence_by_campaign, enroll_lead_in_sequence
+
+    data = request.json
+    person_keys = data.get("person_keys", [])
+
+    sequence = load_sequence_by_campaign(campaign_id)
+    if not sequence:
+        return jsonify({"error": "No sequence found for this campaign"}), 404
+
+    enrolled_count = 0
+    errors = []
+
+    for person_key in person_keys:
+        try:
+            enroll_lead_in_sequence(person_key, campaign_id, sequence['id'])
+            enrolled_count += 1
+        except Exception as e:
+            errors.append(f"{person_key}: {str(e)}")
+
+    return jsonify({
+        "enrolled": enrolled_count,
+        "total": len(person_keys),
+        "errors": errors
+    })
+
+
+@app.route("/api/campaigns/<campaign_id>/sequence/status", methods=["GET"])
+def get_sequence_status(campaign_id):
+    """Get sequence execution status."""
+    from sequence_engine import load_sequence_by_campaign, get_sequence_status as get_status
+
+    sequence = load_sequence_by_campaign(campaign_id)
+    if not sequence:
+        return jsonify({"error": "No sequence found"}), 404
+
+    status = get_status(sequence['id'])
+    return jsonify({"status": status})
+
+
+# ====================
+# NEW ENDPOINTS: Email Preview & Test
+# ====================
+
+@app.route("/api/campaigns/<campaign_id>/preview", methods=["POST"])
+def preview_campaign_email(campaign_id):
+    """Generate email preview for a specific lead."""
+    data = request.json
+    person_key = data.get("person_key")
+
+    if not person_key:
+        return jsonify({"error": "person_key required"}), 400
+
+    # Load person and company data
+    person = get_person_by_key(person_key)
+    if not person:
+        return jsonify({"error": "Person not found"}), 404
+
+    company = get_company_by_key(person['company_key']) if person.get('company_key') else {}
+
+    # Load campaign
+    campaigns_data = load_json()
+    campaigns = {c['id']: c for c in campaigns_data.get('campaigns', [])}
+    campaign = campaigns.get(campaign_id)
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+
+    # Get personalization mode from campaign settings
+    settings = campaign.get('settings', {})
+    personalization_mode = settings.get('personalization_mode', 'signal_based')
+
+    # Generate personalized content
+    from personalization_engine import generate_email_by_mode
+
+    lead_data = {
+        'Company': company.get('name', ''),
+        'company_name': company.get('name', ''),
+        'first_name': person.get('first_name', ''),
+        'First Name': person.get('first_name', ''),
+        'title': person.get('title', ''),
+        'Job title': person.get('title', '')
+    }
+
+    apollo_data = {
+        'industry': company.get('industry', ''),
+        'employee_count': company.get('employee_count', ''),
+        'technologies': company.get('technologies', ''),
+        'wms_system': company.get('wms_system', ''),
+        'equipment_signals': company.get('equipment_signals', ''),
+        'job_postings_relevant': company.get('job_postings_relevant', 0)
+    }
+
+    template_context = {
+        'strategy': campaign.get('strategy', 'conventional'),
+        'pain_theme': 'throughput'
+    }
+
+    personalization, success = generate_email_by_mode(
+        personalization_mode,
+        lead_data,
+        apollo_data,
+        template_context
+    )
+
+    if not success:
+        personalization = "[Personalization generation failed]"
+
+    # Build email content
+    sequence = campaign.get('sequence', {})
+    email_template = sequence.get('email_1', {}).get('variant_a', {})
+
+    subject = email_template.get('subject', 'Subject line here')
+    body_template = email_template.get('body', '')
+
+    # Replace variables
+    body_html = body_template.replace('{{personalization_sentence}}', personalization)
+    body_html = body_html.replace('{{first_name}}', person.get('first_name', ''))
+    body_html = body_html.replace('{{company_name}}', company.get('name', ''))
+
+    # Get signature
+    from signature_manager import get_default_signature
+    signature = get_default_signature()
+    if signature:
+        body_html += f"\n\n{signature['html_content']}"
+
+    # Get sender
+    sender_profile = Config.get_sender_profile(0)
+
+    return jsonify({
+        "subject": subject,
+        "body_html": body_html,
+        "body_plain": html_to_plain_text(body_html),
+        "sender_name": sender_profile['full_name'],
+        "sender_email": sender_profile['email'],
+        "recipient_name": f"{person['first_name']} {person['last_name']}",
+        "recipient_email": person['email']
+    })
+
+
+@app.route("/api/campaigns/<campaign_id>/test-email", methods=["POST"])
+def send_test_email(campaign_id):
+    """Send test email to specified address."""
+    data = request.json
+    person_key = data.get("person_key")
+    test_recipient = data.get("test_recipient")
+
+    if not person_key or not test_recipient:
+        return jsonify({"error": "person_key and test_recipient required"}), 400
+
+    # Load person and company data
+    person = get_person_by_key(person_key)
+    if not person:
+        return jsonify({"error": "Person not found"}), 404
+
+    company = get_company_by_key(person['company_key']) if person.get('company_key') else {}
+
+    # Load campaign
+    campaigns_data = load_json()
+    campaigns = {c['id']: c for c in campaigns_data.get('campaigns', [])}
+    campaign = campaigns.get(campaign_id)
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+
+    # Get personalization mode from campaign settings
+    settings = campaign.get('settings', {})
+    personalization_mode = settings.get('personalization_mode', 'signal_based')
+
+    # Generate personalized content
+    from personalization_engine import generate_email_by_mode
+
+    lead_data = {
+        'Company': company.get('name', ''),
+        'company_name': company.get('name', ''),
+        'first_name': person.get('first_name', ''),
+        'First Name': person.get('first_name', ''),
+        'title': person.get('title', ''),
+        'Job title': person.get('title', '')
+    }
+
+    apollo_data = {
+        'industry': company.get('industry', ''),
+        'employee_count': company.get('employee_count', ''),
+        'technologies': company.get('technologies', ''),
+        'wms_system': company.get('wms_system', ''),
+        'equipment_signals': company.get('equipment_signals', ''),
+        'job_postings_relevant': company.get('job_postings_relevant', 0)
+    }
+
+    template_context = {
+        'strategy': campaign.get('strategy', 'conventional'),
+        'pain_theme': 'throughput'
+    }
+
+    personalization, success = generate_email_by_mode(
+        personalization_mode,
+        lead_data,
+        apollo_data,
+        template_context
+    )
+
+    if not success:
+        personalization = "[Personalization generation failed]"
+
+    # Build email content
+    sequence = campaign.get('sequence', {})
+    email_template = sequence.get('email_1', {}).get('variant_a', {})
+
+    subject = email_template.get('subject', 'Subject line here')
+    body_template = email_template.get('body', '')
+
+    # Replace variables
+    body_html = body_template.replace('{{personalization_sentence}}', personalization)
+    body_html = body_html.replace('{{first_name}}', person.get('first_name', ''))
+    body_html = body_html.replace('{{company_name}}', company.get('name', ''))
+
+    # Get signature
+    from signature_manager import get_default_signature
+    signature = get_default_signature()
+    if signature:
+        body_html += f"\n\n{signature['html_content']}"
+
+    # Get sender
+    sender_profile = Config.get_sender_profile(0)
+
+    # Send via SendGrid
+    try:
+        success = send_via_sendgrid(
+            to_email=test_recipient,
+            from_email=sender_profile['email'],
+            from_name=sender_profile['full_name'],
+            subject=f"[TEST] {subject}",
+            html_body=body_html,
+            plain_body=html_to_plain_text(body_html)
+        )
+
+        if success:
+            logger.info(f"Test email sent successfully to {test_recipient}")
+            return jsonify({"status": "sent", "message": f"Test email sent to {test_recipient}"})
+        else:
+            logger.error("SendGrid API failed to send test email")
+            return jsonify({"error": "Failed to send email via SendGrid"}), 500
+    except Exception as e:
+        logger.error(f"Error sending test email: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ====================
+# NEW ENDPOINTS: Variables & Webhooks
+# ====================
+
+@app.route("/api/variables", methods=["GET"])
+def get_available_variables():
+    """Return all available template variables."""
+    variables = [
+        # Person fields
+        {"name": "first_name", "category": "Person", "example": "John"},
+        {"name": "last_name", "category": "Person", "example": "Smith"},
+        {"name": "title", "category": "Person", "example": "VP Operations"},
+        {"name": "email", "category": "Person", "example": "john@company.com"},
+        {"name": "phone", "category": "Person", "example": "+1-801-555-0100"},
+        {"name": "linkedin_url", "category": "Person", "example": "linkedin.com/in/johnsmith"},
+        {"name": "seniority", "category": "Person", "example": "Director"},
+        {"name": "department", "category": "Person", "example": "Operations"},
+
+        # Company fields
+        {"name": "company_name", "category": "Company", "example": "Acme Logistics"},
+        {"name": "industry", "category": "Company", "example": "3PL"},
+        {"name": "employee_count", "category": "Company", "example": "350"},
+        {"name": "estimated_revenue", "category": "Company", "example": "$50M-$100M"},
+        {"name": "technologies", "category": "Company", "example": "Manhattan WMS, SAP"},
+        {"name": "wms_system", "category": "Company", "example": "Manhattan"},
+        {"name": "city", "category": "Company", "example": "Salt Lake City"},
+        {"name": "state", "category": "Company", "example": "Utah"},
+
+        # Enrichment/Signals
+        {"name": "job_postings_count", "category": "Signals", "example": "5"},
+        {"name": "job_postings_relevant", "category": "Signals", "example": "3"},
+        {"name": "equipment_signals", "category": "Signals", "example": "conveyor, sortation"},
+        {"name": "intent_score", "category": "Signals", "example": "0.75"},
+
+        # Personalization
+        {"name": "personalization_sentence", "category": "AI Generated", "example": "Your recent expansion..."},
+        {"name": "pain_statement", "category": "AI Generated", "example": "Labor costs cutting into margins"},
+        {"name": "credibility_anchor", "category": "AI Generated", "example": "We helped a 200k sq ft 3PL..."},
+
+        # Sender
+        {"name": "sender_name", "category": "Sender", "example": "Aaron Cendejas"},
+        {"name": "sender_email", "category": "Sender", "example": "aaron@intralog.io"},
+        {"name": "sender_title", "category": "Sender", "example": "Senior Systems Engineer"},
+        {"name": "signature", "category": "Sender", "example": "[HTML signature]"}
+    ]
+
+    return jsonify({"variables": variables})
+
+
+@app.route("/api/webhooks/bland-ai", methods=["POST"])
+def bland_ai_webhook():
+    """Handle Bland.ai call completion webhooks."""
+    data = request.json
+
+    call_id = data.get("call_id")
+    status = data.get("status")  # 'completed', 'failed', 'no-answer'
+    duration = data.get("call_length")  # seconds
+    transcript = data.get("transcript")
+    recording_url = data.get("recording_url")
+
+    logger.info(f"Bland.ai webhook received: call_id={call_id}, status={status}, duration={duration}s")
+
+    # Update outreach_log with call outcome
+    from lead_registry import get_connection
+    conn = get_connection()
+
+    try:
+        conn.execute("""
+            UPDATE outreach_log
+            SET status = ?,
+                action_metadata = json_set(
+                    action_metadata,
+                    '$.call_duration', ?,
+                    '$.transcript', ?,
+                    '$.recording_url', ?
+                )
+            WHERE json_extract(action_metadata, '$.call_id') = ?
+        """, (status, duration, transcript, recording_url, call_id))
+
+        conn.close()
+
+        return jsonify({"status": "received"})
+    except Exception as e:
+        logger.error(f"Failed to update call status: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+# ====================
+# NEW ENDPOINTS: Apollo Credit Tracking
+# ====================
+
+@app.route("/api/apollo/credits", methods=["GET"])
+def get_apollo_credits():
+    """Track Apollo credit usage."""
+    from lead_registry import get_connection
+
+    conn = get_connection()
+
+    try:
+        credits_used = conn.execute("""
+            SELECT
+                COUNT(*) as total_enrichments,
+                SUM(reveal_phone_number) as phone_reveals,
+                SUM(reveal_personal_emails) as email_reveals
+            FROM apollo_queue
+            WHERE status = 'enriched'
+        """).fetchone()
+
+        conn.close()
+
+        total = credits_used['total_enrichments'] if credits_used else 0
+        phones = credits_used['phone_reveals'] if credits_used else 0
+        emails = credits_used['email_reveals'] if credits_used else 0
+
+        return jsonify({
+            "credits_used": total,
+            "phone_reveals": phones,
+            "email_reveals": emails,
+            "credits_remaining": 100 - total,
+            "breakdown": {
+                "phone_numbers": phones,
+                "personal_emails": emails
+            }
+        })
+    except Exception as e:
+        logger.error(f"Failed to get credit usage: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

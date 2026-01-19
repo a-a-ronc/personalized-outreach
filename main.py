@@ -22,7 +22,9 @@ ROLE_LEVEL_KEYWORDS = {
     "engineer": ["engineer", "engineering", "systems", "industrial", "automation", "controls"]
 }
 
-PAIN_LIBRARY = {
+# Pain Library for Conventional Material Handling Strategy
+# Target: ICP 1 & 3 (pick modules, racking, mezzanines, conventional storage)
+PAIN_LIBRARY_CONVENTIONAL = {
     "ICP 1": {
         "c_suite": [
             {"theme": "reconfiguration", "statement": "Racking layouts tend to fall behind client mix shifts long before warehouse growth plans do."},
@@ -39,24 +41,6 @@ PAIN_LIBRARY = {
         "engineer": [
             {"theme": "reconfiguration", "statement": "Slotting and layout adjustments usually take more time than the client mix allows."},
             {"theme": "integration", "statement": "Controls and WMS handoffs can become brittle once new storage zones are added."}
-        ]
-    },
-    "ICP 2": {
-        "c_suite": [
-            {"theme": "space", "statement": "Cold storage operations often hit density limits before automation plans are ready."},
-            {"theme": "throughput", "statement": "Throughput targets tend to collide with pallet access constraints in cold environments."}
-        ],
-        "vp_director": [
-            {"theme": "space", "statement": "Pallet density and access usually start competing as cold volumes expand."},
-            {"theme": "integration", "statement": "Automation readiness can be delayed by integration risk in temperature-controlled zones."}
-        ],
-        "manager": [
-            {"theme": "space", "statement": "Space utilization can tighten quickly when inbound and staging overlap in cold areas."},
-            {"theme": "labor", "statement": "Labor planning gets tough when travel time and staging keep shifting in cold storage."}
-        ],
-        "engineer": [
-            {"theme": "space", "statement": "High-density storage choices usually force tradeoffs between access time and pallet density."},
-            {"theme": "integration", "statement": "Controls integration tends to slow once cold zones add automation in phases."}
         ]
     },
     "ICP 3": {
@@ -77,42 +61,6 @@ PAIN_LIBRARY = {
             {"theme": "throughput", "statement": "Conveyance and staging handoffs usually set the practical throughput ceiling."}
         ]
     },
-    "ICP 4": {
-        "c_suite": [
-            {"theme": "throughput", "statement": "Throughput targets usually hit a ceiling before the network design does."},
-            {"theme": "integration", "statement": "Controls coordination often becomes the pacing item as sortation expands."}
-        ],
-        "vp_director": [
-            {"theme": "throughput", "statement": "Conveyor and sortation handoffs often cap throughput as volume peaks."},
-            {"theme": "integration", "statement": "Controls and WMS coordination tends to lag once sortation grows."}
-        ],
-        "manager": [
-            {"theme": "throughput", "statement": "Peak throughput often gets constrained by merge points and induction flow."},
-            {"theme": "labor", "statement": "Labor allocation can get tight when induction and outbound staffing swing daily."}
-        ],
-        "engineer": [
-            {"theme": "integration", "statement": "Controls timing between conveyor zones tends to be the first bottleneck."},
-            {"theme": "throughput", "statement": "Sortation merges usually set the upper bound on throughput."}
-        ]
-    },
-    "ICP 5": {
-        "c_suite": [
-            {"theme": "space", "statement": "High-density storage targets usually come before automation programs are stable."},
-            {"theme": "integration", "statement": "Automation integration risk often sets the pace for phased upgrades."}
-        ],
-        "vp_director": [
-            {"theme": "space", "statement": "Density and access tradeoffs tend to sharpen as volumes scale."},
-            {"theme": "integration", "statement": "Integration planning can slow down phased automation rollouts."}
-        ],
-        "manager": [
-            {"theme": "space", "statement": "Storage density can tighten quickly when inbound staging expands."},
-            {"theme": "labor", "statement": "Labor coverage tends to get uneven around automated and manual zones."}
-        ],
-        "engineer": [
-            {"theme": "integration", "statement": "Integration between automation and controls tends to surface first in phased rollouts."},
-            {"theme": "space", "statement": "Dense storage layouts usually trade off access time and retrieval sequence."}
-        ]
-    },
     "DEFAULT": {
         "unknown": [
             {"theme": "throughput", "statement": "Throughput often tightens where storage and picking exchange materials."},
@@ -120,6 +68,103 @@ PAIN_LIBRARY = {
         ]
     }
 }
+
+# Pain Library for Semi-Automation & High-Density Strategy
+# Target: ICP 2 & 5 (pallet shuttles, VLMs, conveyors, high-density storage)
+PAIN_LIBRARY_SEMI_AUTO = {
+    "ICP 2": {
+        "c_suite": [
+            {"theme": "space", "statement": "Dense storage usually delivers faster ROI than full automation, but most WMS systems struggle with shuttle orchestration."},
+            {"theme": "integration", "statement": "Automation pilots often stall when controls and WMS coordination becomes the pacing item."}
+        ],
+        "vp_director": [
+            {"theme": "space", "statement": "Pallet shuttles can double capacity without forklift headcount, but staging logic is where most implementations slow down."},
+            {"theme": "throughput", "statement": "VLMs tend to bottleneck at the operator interface unless retrieval sequencing ties into your pick logic."}
+        ],
+        "manager": [
+            {"theme": "space", "statement": "Push-back and shuttle systems usually pay back in 18 months, but staging handoffs need design attention upfront."},
+            {"theme": "labor", "statement": "Dense storage cuts travel time, but most operations lose the gain if replenishment timing isn't coordinated."}
+        ],
+        "engineer": [
+            {"theme": "integration", "statement": "Shuttle controls and WMS handoffs tend to be the first integration friction point in phased rollouts."},
+            {"theme": "space", "statement": "High-density layouts force tradeoffs between FIFO access and pallet density that most WMS logic doesn't handle well."}
+        ]
+    },
+    "ICP 5": {
+        "c_suite": [
+            {"theme": "space", "statement": "High-density storage targets usually come before automation programs are stable."},
+            {"theme": "integration", "statement": "Phased automation rollouts often stall when controls coordination becomes the longest tail."}
+        ],
+        "vp_director": [
+            {"theme": "space", "statement": "Density and access tradeoffs tend to sharpen as volumes scale and automation phases overlap."},
+            {"theme": "integration", "statement": "Integration planning can slow down phased automation rollouts when controls and WMS timing lags equipment delivery."}
+        ],
+        "manager": [
+            {"theme": "space", "statement": "Storage density can tighten quickly when inbound staging expands ahead of automation deployment."},
+            {"theme": "labor", "statement": "Labor coverage tends to get uneven around automated and manual zones during phased rollouts."}
+        ],
+        "engineer": [
+            {"theme": "integration", "statement": "Integration between automation and controls tends to surface first in phased rollouts when zone handoffs multiply."},
+            {"theme": "space", "statement": "Dense storage layouts usually trade off access time and retrieval sequence unless controls orchestration is designed upfront."}
+        ]
+    },
+    "DEFAULT": {
+        "unknown": [
+            {"theme": "space", "statement": "Dense storage and access tradeoffs usually surface before automation plans are stable."},
+            {"theme": "integration", "statement": "Controls and WMS coordination tends to lag equipment deployment in phased projects."}
+        ]
+    }
+}
+
+# Pain Library for Full Automation Systems Strategy
+# Target: ICP 4 & 5 (ASRS, AGV/AMR, sortation, goods-to-person)
+PAIN_LIBRARY_FULL_AUTO = {
+    "ICP 4": {
+        "c_suite": [
+            {"theme": "throughput", "statement": "Sortation capacity usually hits theoretical limits before network design does—merge logic and induction timing are the real ceiling."},
+            {"theme": "integration", "statement": "Controls orchestration across zones tends to be the longest tail in automated fulfillment expansions."}
+        ],
+        "vp_director": [
+            {"theme": "throughput", "statement": "Peak throughput in sortation systems almost always caps at merge points, not at the sorter itself."},
+            {"theme": "integration", "statement": "WMS and controls coordination lags most automation expansions by 3-6 months unless integration planning starts early."}
+        ],
+        "manager": [
+            {"theme": "throughput", "statement": "Induction and merge flow usually constrain sortation throughput more than the equipment spec sheets suggest."},
+            {"theme": "labor", "statement": "Labor allocation between induction and outbound tends to swing daily in automated systems without dynamic staffing models."}
+        ],
+        "engineer": [
+            {"theme": "integration", "statement": "Controls timing between conveyor zones and sortation merges is almost always the first bottleneck in throughput optimization."},
+            {"theme": "throughput", "statement": "Sortation merge logic and accumulation zone sizing usually set the practical throughput ceiling, not the sorter itself."}
+        ]
+    },
+    "ICP 5": {
+        "c_suite": [
+            {"theme": "integration", "statement": "Automation integration risk often sets the pace for phased upgrades when controls orchestration spans multiple vendors."},
+            {"theme": "throughput", "statement": "Automated systems usually cap at zone handoff timing before equipment capacity becomes the bottleneck."}
+        ],
+        "vp_director": [
+            {"theme": "integration", "statement": "Integration planning can slow down phased automation rollouts when AGV traffic and conveyor merge timing need orchestration."},
+            {"theme": "throughput", "statement": "Goods-to-person throughput often caps at buffer zone handoffs before robotic pick rates become the constraint."}
+        ],
+        "manager": [
+            {"theme": "integration", "statement": "Zone-to-zone handoffs in automated systems usually create the first throughput ceiling as volumes scale."},
+            {"theme": "labor", "statement": "Labor coverage tends to get uneven around automated and manual zones when exception handling workflows aren't defined upfront."}
+        ],
+        "engineer": [
+            {"theme": "integration", "statement": "Integration between automation and controls tends to surface first when zone handoffs multiply across AGV, ASRS, and conveyor systems."},
+            {"theme": "throughput", "statement": "Automated material flow usually bottlenecks at merge points and buffer zones before individual equipment hits capacity limits."}
+        ]
+    },
+    "DEFAULT": {
+        "unknown": [
+            {"theme": "integration", "statement": "Controls orchestration across zones tends to be the longest tail in automated systems."},
+            {"theme": "throughput", "statement": "Automated throughput usually caps at zone handoffs before equipment capacity limits."}
+        ]
+    }
+}
+
+# Legacy alias for backward compatibility
+PAIN_LIBRARY = PAIN_LIBRARY_CONVENTIONAL
 
 PAIN_THEME_KEYWORDS = {
     "throughput": ["throughput", "sortation", "merge", "induction", "shipping", "shipping dock", "case handling"],
@@ -206,32 +251,44 @@ CTA_FOLLOWUP_TEMPLATES = {
     ]
 }
 
-CREDIBILITY_TEMPLATES = [
-    "We work on {equipment_category}.",
-    "We design and install {equipment_category}.",
-    "We implement {equipment_category} with OEM partners."
+# Credibility templates with proof elements - strategy specific
+CREDIBILITY_TEMPLATES_CONVENTIONAL = [
+    "We've designed {equipment_category} in 100+ facilities across food, pharma, and industrial distribution.",
+    "We work on {equipment_category} with a focus on reconfiguration speed as client mix shifts.",
+    "We implement {equipment_category} and built Warehousr to help you re-slot layouts as SKU velocity changes."
 ]
 
-SUBJECT_TEMPLATES_BY_THEME = {
+CREDIBILITY_TEMPLATES_SEMI_AUTO = [
+    "We've deployed {equipment_category} in 40+ facilities where pallet density and FIFO access both matter.",
+    "We design {equipment_category} and built DensityPro to handle the staging orchestration most WMS systems skip.",
+    "We implement {equipment_category} with partners like Westfalia and Dematic—and fix the controls handoffs that slow most projects."
+]
+
+CREDIBILITY_TEMPLATES_FULL_AUTO = [
+    "We design {equipment_category} and partner with Lully to handle WMS coordination that most integrators overlook.",
+    "We've commissioned {equipment_category} in 30+ fulfillment operations where merge timing determines throughput.",
+    "We implement {equipment_category} with OEMs like Honeywell and Intelligrated—our focus is controls orchestration, not just equipment."
+]
+
+# Legacy alias for backward compatibility
+CREDIBILITY_TEMPLATES = CREDIBILITY_TEMPLATES_CONVENTIONAL
+
+# Subject line templates - strategy specific
+SUBJECT_TEMPLATES_CONVENTIONAL = {
     "throughput": [
-        "Where throughput tightens first",
-        "Throughput handoff check",
-        "Throughput bottleneck question"
-    ],
-    "space": [
-        "Density vs access",
-        "Space tradeoffs in {industry}",
-        "Storage density question"
-    ],
-    "labor": [
-        "Labor balance in {industry}",
-        "Where labor gets thin",
-        "Labor coverage question"
+        "3PL pick module question",
+        "Where {industry} flow slows first",
+        "Quick thought on {industry} throughput"
     ],
     "reconfiguration": [
-        "Layout shifts in {industry}",
-        "Re-slotting timing",
-        "Layout change question"
+        "{industry} slotting lag",
+        "Re-slotting timing in {industry}",
+        "Layout drift question"
+    ],
+    "labor": [
+        "Replen vs pick coverage in {industry}",
+        "Shift balance question",
+        "Where labor tightens in {industry}"
     ],
     "integration": [
         "System handoff check",
@@ -239,6 +296,50 @@ SUBJECT_TEMPLATES_BY_THEME = {
         "Integration handoff note"
     ]
 }
+
+SUBJECT_TEMPLATES_SEMI_AUTO = {
+    "space": [
+        "Pallet shuttle staging question",
+        "Dense storage handoff in {industry}",
+        "VLM sequencing thought"
+    ],
+    "integration": [
+        "Shuttle + WMS coordination",
+        "Controls handoff in {industry}",
+        "Phased automation question"
+    ],
+    "throughput": [
+        "VLM retrieval bottleneck",
+        "Conveyor merge timing in {industry}",
+        "Density vs throughput tradeoff"
+    ],
+    "labor": [
+        "Dense storage labor question",
+        "Staging timing in {industry}",
+        "Replen coordination thought"
+    ]
+}
+
+SUBJECT_TEMPLATES_FULL_AUTO = {
+    "throughput": [
+        "Sortation merge timing",
+        "Induction ceiling in {industry}",
+        "Where fulfillment caps first"
+    ],
+    "integration": [
+        "Controls orchestration lag",
+        "WMS + automation handoff",
+        "Zone timing in {industry} sortation"
+    ],
+    "labor": [
+        "Exception handling in automation",
+        "Zone staffing in {industry}",
+        "Labor allocation question"
+    ]
+}
+
+# Legacy alias for backward compatibility
+SUBJECT_TEMPLATES_BY_THEME = SUBJECT_TEMPLATES_CONVENTIONAL
 
 SUBJECT_TEMPLATES_BY_ICP = {
     "ICP 1": [
@@ -324,6 +425,23 @@ def normalize_text(value) -> str:
     return str(value).strip()
 
 
+def normalize_strategy(value: str, default: str = "conventional") -> str:
+    text = normalize_text(value).lower()
+    if text in {"conventional", "semi_auto", "full_auto", "hybrid"}:
+        return text
+    return default
+
+
+def resolve_email_strategies(row: dict, default_strategy: str) -> tuple[str, str, str]:
+    assignment = normalize_strategy(
+        row.get("strategy_assignment") or row.get("strategy") or default_strategy,
+        default_strategy
+    )
+    if assignment == "hybrid":
+        return assignment, "semi_auto", "full_auto"
+    return assignment, assignment, assignment
+
+
 def deterministic_index(seed: str, modulo: int) -> int:
     if modulo <= 0:
         return 0
@@ -387,10 +505,53 @@ def infer_pain_theme(icp_match: str, role_level: str, equipment: str, notes: str
     return "throughput"
 
 
-def select_pain_statement(icp_match: str, role_level: str, pain_theme: str) -> str:
-    role_entry = PAIN_LIBRARY.get(icp_match, {}).get(role_level, [])
+def get_pain_library_for_strategy(strategy: str = "conventional") -> dict:
+    """Return the appropriate pain library based on campaign strategy"""
+    if strategy == "semi_auto":
+        return PAIN_LIBRARY_SEMI_AUTO
+    elif strategy == "full_auto":
+        return PAIN_LIBRARY_FULL_AUTO
+    else:
+        return PAIN_LIBRARY_CONVENTIONAL
+
+
+def get_subject_templates_for_strategy(strategy: str = "conventional") -> dict:
+    """Return the appropriate subject templates based on campaign strategy"""
+    if strategy == "semi_auto":
+        return SUBJECT_TEMPLATES_SEMI_AUTO
+    elif strategy == "full_auto":
+        return SUBJECT_TEMPLATES_FULL_AUTO
+    else:
+        return SUBJECT_TEMPLATES_CONVENTIONAL
+
+
+def get_credibility_templates_for_strategy(strategy: str = "conventional") -> list:
+    """Return the appropriate credibility templates based on campaign strategy"""
+    if strategy == "semi_auto":
+        return CREDIBILITY_TEMPLATES_SEMI_AUTO
+    elif strategy == "full_auto":
+        return CREDIBILITY_TEMPLATES_FULL_AUTO
+    else:
+        return CREDIBILITY_TEMPLATES_CONVENTIONAL
+
+
+def select_pain_statement(icp_match: str, role_level: str, pain_theme: str, strategy: str = "conventional") -> str:
+    """
+    Select pain statement from strategy-specific pain library
+
+    Args:
+        icp_match: ICP segment (ICP 1, ICP 2, etc.)
+        role_level: Role level (c_suite, vp_director, manager, engineer, unknown)
+        pain_theme: Pain theme (throughput, space, labor, etc.)
+        strategy: Campaign strategy (conventional, semi_auto, full_auto)
+
+    Returns:
+        Pain statement string
+    """
+    pain_library = get_pain_library_for_strategy(strategy)
+    role_entry = pain_library.get(icp_match, {}).get(role_level, [])
     if not role_entry:
-        role_entry = PAIN_LIBRARY.get("DEFAULT", {}).get("unknown", [])
+        role_entry = pain_library.get("DEFAULT", {}).get("unknown", [])
 
     for entry in role_entry:
         if entry["theme"] == pain_theme:
@@ -426,11 +587,12 @@ def confidence_to_certainty(icp_confidence: str) -> str:
     return "light"
 
 
-def build_credibility_anchor(equipment_category: str, seed: str) -> tuple[str, str]:
+def build_credibility_anchor(equipment_category: str, seed: str, strategy: str = "conventional") -> tuple[str, str]:
+    credibility_templates = get_credibility_templates_for_strategy(strategy)
     variant_key = f"cred-{slugify(equipment_category)}"
     variant_id, template = select_variant(
         seed,
-        CREDIBILITY_TEMPLATES,
+        credibility_templates,
         variant_key,
         f"credibility-{equipment_category}"
     )
@@ -551,12 +713,13 @@ def get_equipment_offer(icp_match: str, equipment: str, notes: str) -> tuple[str
     return (equipment_category, software_mention)
 
 
-def get_subject_line(icp_match: str, pain_theme: str, industry: str, seed: str) -> tuple[str, str]:
+def get_subject_line(icp_match: str, pain_theme: str, industry: str, seed: str, strategy: str = "conventional") -> tuple[str, str]:
     """
     Get a deterministic subject line variation based on ICP and pain theme.
     """
     industry_text = normalize_text(industry) or "operations"
-    theme_templates = SUBJECT_TEMPLATES_BY_THEME.get(pain_theme, [])
+    subject_templates = get_subject_templates_for_strategy(strategy)
+    theme_templates = subject_templates.get(pain_theme, [])
     icp_templates = SUBJECT_TEMPLATES_BY_ICP.get(icp_match, [])
     fallback = [f"Quick thought on {industry_text} operations"]
 
@@ -602,13 +765,16 @@ def fill_template(template: str, data: dict) -> str:
     return result
 
 
-def prepare_personalization_controls(df: pd.DataFrame) -> pd.DataFrame:
+def prepare_personalization_controls(df: pd.DataFrame, strategy: str = "conventional") -> pd.DataFrame:
     role_levels = []
     icp_confidences = []
     certainty_levels = []
     pain_themes = []
     pain_statements = []
     equipment_anchors = []
+    strategy_assignments = []
+    strategy_email_1 = []
+    strategy_email_2 = []
 
     for _, row in df.iterrows():
         job_title = normalize_text(row.get("Job title", ""))
@@ -620,7 +786,8 @@ def prepare_personalization_controls(df: pd.DataFrame) -> pd.DataFrame:
         role_level = classify_role_level(job_title)
         anchors = extract_equipment_anchors(equipment, notes)
         pain_theme = infer_pain_theme(icp_match, role_level, equipment, notes)
-        pain_statement = select_pain_statement(icp_match, role_level, pain_theme)
+        assignment, email_1_strategy, email_2_strategy = resolve_email_strategies(row, strategy)
+        pain_statement = select_pain_statement(icp_match, role_level, pain_theme, email_1_strategy)
         icp_confidence = compute_icp_confidence(icp_match, industry, role_level, anchors)
         certainty_level = confidence_to_certainty(icp_confidence)
 
@@ -630,6 +797,9 @@ def prepare_personalization_controls(df: pd.DataFrame) -> pd.DataFrame:
         pain_themes.append(pain_theme)
         pain_statements.append(pain_statement)
         equipment_anchors.append(", ".join(anchors))
+        strategy_assignments.append(assignment)
+        strategy_email_1.append(email_1_strategy)
+        strategy_email_2.append(email_2_strategy)
 
     df["role_level"] = role_levels
     df["icp_confidence"] = icp_confidences
@@ -637,11 +807,14 @@ def prepare_personalization_controls(df: pd.DataFrame) -> pd.DataFrame:
     df["pain_theme"] = pain_themes
     df["pain_statement"] = pain_statements
     df["equipment_anchor"] = equipment_anchors
+    df["strategy_assignment"] = strategy_assignments
+    df["strategy_email_1"] = strategy_email_1
+    df["strategy_email_2"] = strategy_email_2
 
     return df
 
 
-def generate_campaigns(input_path: str, output_path: str, limit: int = None, raise_on_error: bool = False):
+def generate_campaigns(input_path: str, output_path: str, limit: int = None, raise_on_error: bool = False, strategy: str = "conventional"):
     """
     Main function to generate personalized email campaigns
 
@@ -650,6 +823,7 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
         output_path: Path to output CSV with campaigns
         limit: Optional limit on number of leads to process
         raise_on_error: Raise exceptions instead of exiting (useful for web apps)
+        strategy: Campaign strategy (conventional, semi_auto, full_auto)
     """
     logger.info("=" * 60)
     logger.info("Personalized Outreach Campaign Generator")
@@ -708,7 +882,8 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
     logger.info("✓ Required columns present")
 
     # Prepare deterministic personalization controls
-    df = prepare_personalization_controls(df)
+    logger.info(f"Using campaign strategy: {strategy}")
+    df = prepare_personalization_controls(df, strategy)
 
     # Generate personalization sentences
     logger.info("\n" + "=" * 60)
@@ -748,6 +923,7 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
         equipment_anchor_text = row.get("equipment_anchor", "")
         equipment_anchor_list = [item.strip() for item in str(equipment_anchor_text).split(",") if item.strip()]
         first_name = extract_first_name(full_name)
+        assignment, email_1_strategy, email_2_strategy = resolve_email_strategies(row, strategy)
 
         # Assign sender in round-robin fashion
         sender = Config.get_sender_profile(idx)
@@ -763,7 +939,8 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             icp_match,
             pain_theme,
             industry,
-            seed_email_1
+            seed_email_1,
+            email_1_strategy
         )
 
         # Get equipment offer based on ICP + equipment context
@@ -771,7 +948,13 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
 
         credibility_variant_id, credibility_anchor = build_credibility_anchor(
             equipment_category,
-            seed_email_1
+            seed_email_1,
+            email_1_strategy
+        )
+        credibility_variant_id_followup, credibility_anchor_followup = build_credibility_anchor(
+            equipment_category,
+            seed_email_2,
+            email_2_strategy
         )
         cta_variant_id, cta_label, cta_line = build_cta_line(
             pain_theme,
@@ -881,6 +1064,9 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "subject_variant_id": subject_variant_id,
             "credibility_anchor": credibility_anchor,
             "credibility_variant_id": credibility_variant_id,
+            "strategy_assignment": assignment,
+            "strategy_email_1": email_1_strategy,
+            "strategy_email_2": email_2_strategy,
             "sender_name": sender["full_name"],
             "sender_email": sender["email"],
             "sender_title": sender["title"]
@@ -904,7 +1090,12 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "role_level": row.get("role_level", "unknown"),
             "icp_confidence": icp_confidence,
             "icp_notes": icp_notes,
-            "pain_statement": row.get("pain_statement", ""),
+            "pain_statement": select_pain_statement(
+                icp_match,
+                row.get("role_level", "unknown"),
+                pain_theme,
+                email_2_strategy
+            ),
             "equipment": equipment,
             "equipment_anchor": equipment_anchor_text,
             "equipment_category": equipment_category,
@@ -915,10 +1106,13 @@ def generate_campaigns(input_path: str, output_path: str, limit: int = None, rai
             "cta_line": cta_line_followup,
             "cta_variant_id": cta_variant_id_followup,
             "subject_variant_id": subject_variant_id,
-            "credibility_anchor": credibility_anchor,
-            "credibility_variant_id": credibility_variant_id,
+            "credibility_anchor": credibility_anchor_followup,
+            "credibility_variant_id": credibility_variant_id_followup,
             "reinforcement_line": reinforcement_line,
             "reinforcement_variant_id": reinforcement_variant_id,
+            "strategy_assignment": assignment,
+            "strategy_email_1": email_1_strategy,
+            "strategy_email_2": email_2_strategy,
             "sender_name": sender["full_name"],
             "sender_email": sender["email"],
             "sender_title": sender["title"]

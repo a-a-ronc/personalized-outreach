@@ -11,7 +11,12 @@
       "Bash(py main.py:*)",
       "Bash(py:*)",
       "Bash(gh repo view:*)",
-      "Bash(python main.py:*)"
+      "Bash(python main.py:*)",
+      "Bash(claude auth logout:*)",
+      "Bash(python migrate_db.py:*)",
+      "Bash(\"C:\\\\Users\\\\AaronCendejas\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" migrate_db.py)",
+      "Bash(chmod:*)",
+      "Bash(ls:*)"
     ]
   }
 }
