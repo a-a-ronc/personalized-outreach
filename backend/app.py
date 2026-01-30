@@ -56,7 +56,11 @@ from lead_scoring import (  # noqa: E402
     normalize_text as normalize_scoring_text
 )
 
-app = Flask(__name__)
+# Configure Flask to serve React frontend
+DASHBOARD_DIST = BASE_DIR / "dashboard" / "dist"
+app = Flask(__name__,
+            static_folder=str(DASHBOARD_DIST),
+            static_url_path='')
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 init_db()
@@ -3759,6 +3763,20 @@ def run_job_manually(job_id):
 
     result = run_job_now(job_id)
     return jsonify(result)
+
+
+# Serve React frontend (catch-all route - must be last)
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    """Serve React frontend for all non-API routes."""
+    from flask import send_from_directory
+
+    # If path is a file in static folder, serve it
+    if path and (DASHBOARD_DIST / path).exists():
+        return send_from_directory(str(DASHBOARD_DIST), path)
+    # Otherwise serve index.html (for React Router)
+    return send_from_directory(str(DASHBOARD_DIST), 'index.html')
 
 
 # Initialize scheduler on app start

@@ -17,10 +17,10 @@ data/GeoLite2-*.mmdb
 .DS_Store
 Thumbs.db
 
-# Frontend (we only deploy backend)
+# Frontend source files (we deploy built dist folder)
 dashboard/node_modules/
-dashboard/dist/
 dashboard/.vite/
+dashboard/src/
 
 # Test and temp files
 test_output/
