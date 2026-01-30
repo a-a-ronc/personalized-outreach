@@ -1,7 +1,12 @@
-# Environment and secrets
+# Environment and secrets - CRITICAL: Never commit these
 .env
 *.env
 !.env.example
+secrets/
+credentials/
+*.pem
+*.key
+*.cert
 
 # Python
 __pycache__/
@@ -12,14 +17,27 @@ __pycache__/
 .venv/
 venv/
 ENV/
+.pytest_cache/
 
 # Logs
 *.log
 logs/
 
-# Database (keep structure, ignore data)
+# Database - Contains PII, never commit
+*.db
 data/leads.db
 data/uploads/
+leads.db
+
+# MaxMind GeoLite2 databases (large binary files)
+data/GeoLite2-*.mmdb
+GeoLite2-*.mmdb
+
+# Selenium/Browser automation
+.wdm/
+chromedriver*
+geckodriver*
+*.webdriver
 
 # Frontend
 dashboard/node_modules/

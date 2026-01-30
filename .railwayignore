@@ -1,0 +1,48 @@
+# Don't deploy these to Railway
+.env
+*.env
+!.env.example
+*.db
+leads.db
+data/leads.db
+data/uploads/
+data/GeoLite2-*.mmdb
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Frontend (we only deploy backend)
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# Test and temp files
+test_output/
+output/
+temp/
+tmp/
+*.tmp
+*.log
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+ENV/
+
+# Selenium
+.wdm/
+chromedriver*
+geckodriver*
+*.webdriver

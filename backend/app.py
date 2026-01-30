@@ -45,7 +45,8 @@ from lead_registry import (  # noqa: E402
     get_people_for_campaign,
     calculate_enrichment_hash,
     recent_request_hash,
-    log_outreach
+    log_outreach,
+    utc_now
 )
 from lead_scoring import (  # noqa: E402
     extract_features,
@@ -136,7 +137,7 @@ def send_via_sendgrid(to_email, from_email, from_name, subject, html_body, plain
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
     return response
 
 
@@ -2145,24 +2146,329 @@ def campaign_emails(campaign_id: str):
 
 @app.route("/api/senders")
 def senders():
-    sender_list = []
-    for profile in Config.SENDER_PROFILES:
-        sender_list.append(
-            {
-                "name": profile["full_name"],
-                "email": profile["email"],
-                "title": profile["title"],
-                "status": "Connected",
-                "sent_today": 0,
-                "pending": 0
+    """Get all sender profiles with signatures and personas from database."""
+    from lead_registry import get_connection
+
+    conn = get_connection()
+    try:
+        senders = conn.execute("SELECT * FROM sender_signatures ORDER BY full_name").fetchall()
+        sender_list = [dict(s) for s in senders]
+
+        # If no senders in DB, return config profiles
+        if not sender_list:
+            for profile in Config.SENDER_PROFILES:
+                sender_list.append({
+                    "email": profile["email"],
+                    "full_name": profile["full_name"],
+                    "title": profile["title"],
+                    "phone": profile.get("phone", ""),
+                    "company": profile.get("company", "Intralog"),
+                    "signature_html": profile.get("signature", ""),
+                    "persona_context": ""
+                })
+
+        conn.close()
+        return jsonify(sender_list)
+    except Exception as e:
+        logger.error(f"Failed to get senders: {e}")
+        conn.close()
+        # Fallback to config
+        return jsonify([{
+            "email": p["email"],
+            "full_name": p["full_name"],
+            "title": p["title"],
+            "phone": p.get("phone", ""),
+            "company": p.get("company", "Intralog"),
+            "signature_html": p.get("signature", ""),
+            "persona_context": ""
+        } for p in Config.SENDER_PROFILES])
+
+
+# ====================
+# NEW ENDPOINTS: Signature Management & Sender CRUD
+# ====================
+
+@app.route("/api/senders", methods=["POST"])
+def create_sender():
+    """Create a new sender profile."""
+    from lead_registry import get_connection, utc_now
+
+    data = request.json
+    email = data.get("email")
+    full_name = data.get("full_name")
+
+    if not email or not full_name:
+        return jsonify({"error": "Email and full name are required"}), 400
+
+    conn = get_connection()
+    try:
+        # Check if sender already exists
+        existing = conn.execute("SELECT email FROM sender_signatures WHERE email = ?", (email,)).fetchone()
+        if existing:
+            conn.close()
+            return jsonify({"error": "Sender with this email already exists"}), 400
+
+        # Insert new sender
+        conn.execute("""
+            INSERT INTO sender_signatures (
+                email, full_name, title, company, phone,
+                signature_text, signature_html, persona_context,
+                warmup_enabled, daily_limit, ramp_schedule, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            email,
+            full_name,
+            data.get("title", ""),
+            data.get("company", "Intralog"),
+            data.get("phone", ""),
+            data.get("signature_text", ""),
+            data.get("signature_html", ""),
+            data.get("persona_context", ""),
+            1 if data.get("warmup_enabled") else 0,
+            data.get("daily_limit", 50),
+            data.get("ramp_schedule", "conservative"),
+            utc_now(),
+            utc_now()
+        ))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Created new sender: {email}")
+        return jsonify({"status": "success", "message": "Sender created"})
+    except Exception as e:
+        logger.error(f"Failed to create sender: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/senders/<path:sender_email>", methods=["DELETE"])
+def delete_sender(sender_email):
+    """Delete a sender profile."""
+    from lead_registry import get_connection
+    from urllib.parse import unquote
+
+    # URL decode the email parameter
+    sender_email = unquote(sender_email)
+    logger.info(f"Attempting to delete sender: {sender_email}")
+
+    conn = get_connection()
+    try:
+        # Check if sender exists first
+        existing = conn.execute("SELECT email FROM sender_signatures WHERE email = ?", (sender_email,)).fetchone()
+        if not existing:
+            conn.close()
+            logger.warning(f"Sender not found: {sender_email}")
+            return jsonify({"error": "Sender not found"}), 404
+
+        # Delete the sender
+        conn.execute("DELETE FROM sender_signatures WHERE email = ?", (sender_email,))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Successfully deleted sender: {sender_email}")
+        return jsonify({"status": "success", "message": "Sender deleted"})
+    except Exception as e:
+        logger.error(f"Failed to delete sender {sender_email}: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/senders/<path:sender_email>/analytics")
+def sender_analytics(sender_email):
+    """Get analytics data for a specific sender."""
+    from lead_registry import get_connection
+    from urllib.parse import unquote
+
+    sender_email = unquote(sender_email)
+    logger.info(f"Fetching analytics for sender: {sender_email}")
+
+    conn = get_connection()
+    try:
+        # Get email stats for this sender
+        stats = conn.execute("""
+            SELECT
+                COUNT(CASE WHEN status != 'pending' THEN 1 END) as sent,
+                COUNT(CASE WHEN status = 'delivered' OR status = 'opened' OR status = 'replied' THEN 1 END) as delivered,
+                COUNT(CASE WHEN status = 'opened' OR status = 'replied' THEN 1 END) as opened,
+                COUNT(CASE WHEN status = 'clicked' THEN 1 END) as clicked,
+                COUNT(CASE WHEN status = 'replied' THEN 1 END) as replied,
+                COUNT(CASE WHEN status = 'bounced' THEN 1 END) as bounced,
+                COUNT(CASE WHEN status = 'unsubscribed' THEN 1 END) as unsubscribed
+            FROM emails
+            WHERE sender_email = ?
+        """, (sender_email,)).fetchone()
+
+        # Get warmup status
+        sender = conn.execute("""
+            SELECT warmup_enabled, daily_limit, ramp_schedule, warmup_started_at, created_at
+            FROM sender_signatures WHERE email = ?
+        """, (sender_email,)).fetchone()
+
+        conn.close()
+
+        analytics = dict(stats) if stats else {
+            "sent": 0, "delivered": 0, "opened": 0, "clicked": 0,
+            "replied": 0, "bounced": 0, "unsubscribed": 0
+        }
+
+        # Calculate warmup day if enabled
+        if sender and sender["warmup_enabled"]:
+            from datetime import datetime
+            # Use warmup_started_at if available, otherwise fall back to created_at
+            start_date_str = sender["warmup_started_at"] or sender["created_at"]
+            if start_date_str:
+                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+                warmup_day = (datetime.now(start_date.tzinfo) - start_date).days + 1
+            else:
+                warmup_day = 1
+            analytics["warmup_day"] = min(max(warmup_day, 1), 14)  # Clamp between 1 and 14
+
+            # Calculate current daily limit based on ramp schedule
+            ramp_schedules = {
+                "conservative": [5, 15, 25, 35, 50],  # 4 weeks
+                "moderate": [10, 30, 50],  # 2 weeks
+                "aggressive": [25, 50]  # 1 week
             }
-        )
-    return jsonify(sender_list)
+            schedule = ramp_schedules.get(sender["ramp_schedule"], [50])
+            week = min((warmup_day - 1) // 7, len(schedule) - 1)
+            analytics["current_daily_limit"] = schedule[week]
+        else:
+            analytics["warmup_day"] = 0
+            analytics["current_daily_limit"] = sender["daily_limit"] if sender else 50
+
+        return jsonify(analytics)
+    except Exception as e:
+        logger.error(f"Failed to get sender analytics: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
 
 
-# ====================
-# NEW ENDPOINTS: Signature Management
-# ====================
+@app.route("/api/senders/<path:sender_email>/recipients")
+def sender_recipients(sender_email):
+    """Get recipients by category for drill-down view."""
+    from lead_registry import get_connection
+    from urllib.parse import unquote
+
+    sender_email = unquote(sender_email)
+    category = request.args.get("category", "sent")
+    logger.info(f"Fetching {category} recipients for sender: {sender_email}")
+
+    conn = get_connection()
+    try:
+        # Map category to status filter
+        status_map = {
+            "sent": ["sent", "delivered", "opened", "clicked", "replied"],
+            "delivered": ["delivered", "opened", "clicked", "replied"],
+            "opened": ["opened", "clicked", "replied"],
+            "clicked": ["clicked"],
+            "replied": ["replied"],
+            "bounced": ["bounced"],
+            "unsubscribed": ["unsubscribed"]
+        }
+
+        statuses = status_map.get(category, [category])
+        placeholders = ",".join("?" * len(statuses))
+
+        recipients = conn.execute(f"""
+            SELECT
+                e.recipient_email as email,
+                l.first_name || ' ' || l.last_name as name,
+                l.company_name as company,
+                e.status,
+                e.sent_at as timestamp
+            FROM emails e
+            LEFT JOIN leads l ON e.lead_id = l.id
+            WHERE e.sender_email = ? AND e.status IN ({placeholders})
+            ORDER BY e.sent_at DESC
+            LIMIT 100
+        """, (sender_email, *statuses)).fetchall()
+
+        conn.close()
+
+        return jsonify({
+            "recipients": [dict(r) for r in recipients]
+        })
+    except Exception as e:
+        logger.error(f"Failed to get sender recipients: {e}")
+        conn.close()
+        return jsonify({"error": str(e), "recipients": []}), 500
+
+
+@app.route("/api/senders/<path:sender_email>/emails")
+def sender_emails(sender_email):
+    """Get all emails sent by a specific sender with full details."""
+    from lead_registry import get_connection
+    from urllib.parse import unquote
+
+    sender_email = unquote(sender_email)
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 25, type=int)
+    status_filter = request.args.get("status", None)
+
+    offset = (page - 1) * per_page
+
+    logger.info(f"Fetching emails for sender: {sender_email}, page {page}")
+
+    conn = get_connection()
+    try:
+        # Build query with optional status filter
+        query = """
+            SELECT
+                e.id,
+                e.recipient_email,
+                e.subject,
+                e.body_plain,
+                e.status,
+                e.sent_at,
+                e.opened_at,
+                e.clicked_at,
+                e.replied_at,
+                e.bounced_at,
+                e.campaign_id,
+                e.sequence_id,
+                l.first_name,
+                l.last_name,
+                c.name as company_name
+            FROM emails e
+            LEFT JOIN leads_people l ON e.lead_id = l.person_key
+            LEFT JOIN leads_company c ON l.company_key = c.company_key
+            WHERE e.sender_email = ?
+        """
+        params = [sender_email]
+
+        if status_filter:
+            query += " AND e.status = ?"
+            params.append(status_filter)
+
+        query += " ORDER BY e.sent_at DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+
+        emails = conn.execute(query, params).fetchall()
+
+        # Get total count
+        count_query = "SELECT COUNT(*) FROM emails WHERE sender_email = ?"
+        count_params = [sender_email]
+        if status_filter:
+            count_query += " AND status = ?"
+            count_params.append(status_filter)
+
+        total = conn.execute(count_query, count_params).fetchone()[0]
+
+        conn.close()
+
+        return jsonify({
+            "emails": [dict(e) for e in emails],
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": (total + per_page - 1) // per_page if per_page > 0 else 0
+        })
+    except Exception as e:
+        logger.error(f"Failed to get sender emails: {e}")
+        conn.close()
+        return jsonify({"error": str(e), "emails": [], "total": 0}), 500
+
 
 @app.route("/api/signatures", methods=["GET"])
 def get_signatures():
@@ -2259,6 +2565,7 @@ def save_campaign_sequence(campaign_id):
     data = request.json
     steps = data.get("steps", [])
     name = data.get("name", f"Sequence for {campaign_id}")
+    sender_email = data.get("sender_email", "")
 
     try:
         # Check if sequence exists
@@ -2270,14 +2577,14 @@ def save_campaign_sequence(campaign_id):
             conn = get_connection()
             conn.execute("""
                 UPDATE sequences
-                SET steps = ?, name = ?, updated_at = ?
+                SET steps = ?, name = ?, sender_email = ?, updated_at = ?
                 WHERE id = ?
-            """, (json.dumps(steps), name, utc_now(), existing['id']))
+            """, (json.dumps(steps), name, sender_email, utc_now(), existing['id']))
             conn.close()
             sequence_id = existing['id']
         else:
-            # Create new sequence
-            sequence_id = create_sequence(campaign_id, name, steps)
+            # Create new sequence with sender_email
+            sequence_id = create_sequence(campaign_id, name, steps, sender_email=sender_email)
 
         return jsonify({"status": "saved", "sequence_id": sequence_id})
     except Exception as e:
@@ -2664,8 +2971,810 @@ def get_apollo_credits():
         return jsonify({"error": str(e)}), 500
 
 
+# ====================
+# NEW ENDPOINTS: Sequence Templates
+# ====================
+
+@app.route("/api/sequence-templates", methods=["GET"])
+def list_sequence_templates():
+    """List all sequence templates (system + user-created)."""
+    from lead_registry import get_connection
+
+    conn = get_connection()
+
+    try:
+        templates = conn.execute("""
+            SELECT * FROM sequence_templates
+            ORDER BY is_system_template DESC, created_at DESC
+        """).fetchall()
+
+        conn.close()
+
+        return jsonify({
+            "templates": [dict(t) for t in templates]
+        })
+    except Exception as e:
+        logger.error(f"Failed to list templates: {e}")
+        conn.close()
+        return jsonify({"error": str(e), "templates": []}), 500
+
+
+@app.route("/api/sequence-templates/<template_id>", methods=["GET"])
+def get_sequence_template(template_id):
+    """Get specific sequence template."""
+    from lead_registry import get_connection
+
+    conn = get_connection()
+
+    try:
+        template = conn.execute("""
+            SELECT * FROM sequence_templates WHERE id = ?
+        """, (template_id,)).fetchone()
+
+        conn.close()
+
+        if not template:
+            return jsonify({"error": "Template not found"}), 404
+
+        return jsonify(dict(template))
+    except Exception as e:
+        logger.error(f"Failed to get template: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sequence-templates", methods=["POST"])
+def save_sequence_template():
+    """Save current sequence as template."""
+    from lead_registry import get_connection, utc_now
+    import uuid
+
+    data = request.json
+    name = data.get("name")
+    description = data.get("description", "")
+    category = data.get("category", "custom")
+    steps = data.get("steps", [])
+
+    if not name or not steps:
+        return jsonify({"error": "name and steps required"}), 400
+
+    conn = get_connection()
+
+    try:
+        template_id = f"template_{uuid.uuid4().hex[:12]}"
+        now = utc_now()
+
+        conn.execute("""
+            INSERT INTO sequence_templates
+            (id, name, description, category, steps, is_system_template, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+        """, (template_id, name, description, category, json.dumps(steps), now, now))
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Saved template: {template_id}")
+        return jsonify({"template_id": template_id, "message": "Template saved"})
+    except Exception as e:
+        logger.error(f"Failed to save template: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sequence-templates/<template_id>/clone", methods=["POST"])
+def clone_sequence_template(template_id):
+    """Clone template to new sequence for campaign."""
+    from lead_registry import get_connection
+
+    data = request.json
+    campaign_id = data.get("campaign_id")
+
+    if not campaign_id:
+        return jsonify({"error": "campaign_id required"}), 400
+
+    conn = get_connection()
+
+    try:
+        # Get template
+        template = conn.execute("""
+            SELECT * FROM sequence_templates WHERE id = ?
+        """, (template_id,)).fetchone()
+
+        if not template:
+            conn.close()
+            return jsonify({"error": "Template not found"}), 404
+
+        # Create sequence from template
+        sequence_id = f"seq_{campaign_id}_{uuid.uuid4().hex[:8]}"
+        now = utc_now()
+
+        conn.execute("""
+            INSERT OR REPLACE INTO sequences
+            (id, campaign_id, name, steps, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (sequence_id, campaign_id, template['name'], template['steps'], now, now))
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Cloned template {template_id} to sequence {sequence_id}")
+        return jsonify({
+            "sequence_id": sequence_id,
+            "message": "Template cloned to sequence"
+        })
+    except Exception as e:
+        logger.error(f"Failed to clone template: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+# ====================
+# NEW ENDPOINTS: Unified Inbox
+# ====================
+
+@app.route("/api/inbox", methods=["GET"])
+def get_inbox_activity():
+    """Get unified activity feed across all channels."""
+    from lead_registry import get_connection
+
+    campaign_id = request.args.get("campaign_id")
+    channel = request.args.get("channel", "all")
+    status = request.args.get("status", "all")
+    limit = int(request.args.get("limit", 50))
+    offset = int(request.args.get("offset", 0))
+
+    conn = get_connection()
+
+    try:
+        query = """
+            SELECT
+                ol.id,
+                ol.campaign_id,
+                ol.person_key,
+                ol.status,
+                ol.sent_at as timestamp,
+                ol.channel,
+                ol.sequence_step,
+                ol.action_metadata,
+                lp.first_name,
+                lp.last_name,
+                lp.email as recipient_email,
+                lp.company_key,
+                lc.name as company_name
+            FROM outreach_log ol
+            LEFT JOIN leads_people lp ON ol.person_key = lp.person_key
+            LEFT JOIN leads_company lc ON lp.company_key = lc.company_key
+            WHERE 1=1
+        """
+
+        params = []
+
+        if campaign_id:
+            query += " AND ol.campaign_id = ?"
+            params.append(campaign_id)
+
+        if channel != "all":
+            query += " AND ol.channel = ?"
+            params.append(channel)
+
+        if status != "all":
+            query += " AND ol.status = ?"
+            params.append(status)
+
+        query += " ORDER BY ol.sent_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        activities = conn.execute(query, params).fetchall()
+        conn.close()
+
+        # Format activities
+        formatted = []
+        for activity in activities:
+            act_dict = dict(activity)
+
+            # Parse action_metadata if it exists
+            if act_dict.get('action_metadata'):
+                try:
+                    act_dict['metadata'] = json.loads(act_dict['action_metadata'])
+                except:
+                    act_dict['metadata'] = {}
+
+            # Add recipient name
+            act_dict['recipient_name'] = f"{act_dict.get('first_name', '')} {act_dict.get('last_name', '')}".strip()
+
+            # Add preview based on channel
+            if act_dict.get('metadata'):
+                if act_dict['channel'] == 'email':
+                    act_dict['subject'] = act_dict['metadata'].get('subject', '')
+                    act_dict['preview'] = act_dict['metadata'].get('preview', '')[:100]
+                elif act_dict['channel'] == 'call':
+                    act_dict['duration'] = act_dict['metadata'].get('duration', '0:00')
+                elif act_dict['channel'] == 'linkedin':
+                    act_dict['linkedin_type'] = act_dict['metadata'].get('type', 'message')
+
+            formatted.append(act_dict)
+
+        return jsonify({"activities": formatted})
+    except Exception as e:
+        logger.error(f"Failed to get inbox: {e}")
+        conn.close()
+        return jsonify({"error": str(e), "activities": []}), 500
+
+
+@app.route("/api/inbox/<activity_id>", methods=["GET"])
+def get_activity_details(activity_id):
+    """Get full details for specific activity."""
+    from lead_registry import get_connection
+
+    conn = get_connection()
+
+    try:
+        activity = conn.execute("""
+            SELECT
+                ol.*,
+                lp.first_name,
+                lp.last_name,
+                lp.email as recipient_email,
+                lc.name as company_name,
+                s.name as sequence_name
+            FROM outreach_log ol
+            LEFT JOIN leads_people lp ON ol.person_key = lp.person_key
+            LEFT JOIN leads_company lc ON lp.company_key = lc.company_key
+            LEFT JOIN sequences s ON ol.campaign_id = s.campaign_id
+            WHERE ol.id = ?
+        """, (activity_id,)).fetchone()
+
+        conn.close()
+
+        if not activity:
+            return jsonify({"error": "Activity not found"}), 404
+
+        act_dict = dict(activity)
+
+        # Parse metadata
+        details = {}
+        if act_dict.get('action_metadata'):
+            try:
+                metadata = json.loads(act_dict['action_metadata'])
+                details = metadata
+            except:
+                pass
+
+        # Add sender info
+        sender_profile = Config.get_sender_profile(0)
+        details['sender_email'] = sender_profile['email']
+        details['sender_name'] = sender_profile['full_name']
+        details['sequence_name'] = act_dict.get('sequence_name', '')
+
+        return jsonify({
+            "id": act_dict['id'],
+            "channel": act_dict['channel'],
+            "status": act_dict['status'],
+            "timestamp": act_dict['sent_at'],
+            "recipient_name": f"{act_dict.get('first_name', '')} {act_dict.get('last_name', '')}".strip(),
+            "recipient_email": act_dict.get('recipient_email', ''),
+            "company_name": act_dict.get('company_name', ''),
+            "details": details
+        })
+    except Exception as e:
+        logger.error(f"Failed to get activity details: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/senders/<path:sender_email>/signature", methods=["PUT"])
+def update_sender_signature(sender_email):
+    """Update sender profile including signature, persona, and warmup settings."""
+    from lead_registry import get_connection, utc_now
+    from urllib.parse import unquote
+
+    sender_email = unquote(sender_email)
+    data = request.json
+    signature_text = data.get("signature_text", "")
+    signature_html = data.get("signature_html", "")
+    persona_context = data.get("persona_context", "")
+    warmup_enabled = 1 if data.get("warmup_enabled") else 0
+    daily_limit = data.get("daily_limit", 50)
+    ramp_schedule = data.get("ramp_schedule", "conservative")
+
+    logger.info(f"Updating sender profile: {sender_email}")
+
+    conn = get_connection()
+    try:
+        # Check if warmup is being newly enabled (to set warmup_started_at)
+        existing = conn.execute("""
+            SELECT warmup_enabled, warmup_started_at FROM sender_signatures WHERE email = ?
+        """, (sender_email,)).fetchone()
+
+        # Determine warmup_started_at value
+        warmup_started_at = None
+        if warmup_enabled:
+            if existing and existing["warmup_started_at"]:
+                # Keep existing start date
+                warmup_started_at = existing["warmup_started_at"]
+            elif not existing or not existing["warmup_enabled"]:
+                # Warmup is being newly enabled - set start date to now
+                warmup_started_at = utc_now()
+                logger.info(f"Warmup newly enabled for {sender_email}, starting at {warmup_started_at}")
+
+        # Update sender with all fields including signature_text and warmup settings
+        conn.execute("""
+            INSERT INTO sender_signatures (
+                email, full_name, title, company, phone,
+                signature_text, signature_html, persona_context,
+                warmup_enabled, daily_limit, ramp_schedule, warmup_started_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET
+                full_name = excluded.full_name,
+                title = excluded.title,
+                company = excluded.company,
+                phone = excluded.phone,
+                signature_text = excluded.signature_text,
+                signature_html = excluded.signature_html,
+                persona_context = excluded.persona_context,
+                warmup_enabled = excluded.warmup_enabled,
+                daily_limit = excluded.daily_limit,
+                ramp_schedule = excluded.ramp_schedule,
+                warmup_started_at = COALESCE(excluded.warmup_started_at, sender_signatures.warmup_started_at),
+                updated_at = excluded.updated_at
+        """, (
+            sender_email,
+            data.get("full_name", ""),
+            data.get("title", ""),
+            data.get("company", "Intralog"),
+            data.get("phone", ""),
+            signature_text,
+            signature_html,
+            persona_context,
+            warmup_enabled,
+            daily_limit,
+            ramp_schedule,
+            warmup_started_at,
+            utc_now()
+        ))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Successfully updated sender: {sender_email}")
+        return jsonify({"status": "success", "message": "Sender updated"})
+    except Exception as e:
+        logger.error(f"Failed to update sender {sender_email}: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/senders/<path:sender_email>/warmup", methods=["GET"])
+def get_warmup_status(sender_email):
+    """Get warmup status for a sender."""
+    from warmup_controller import WarmupController
+
+    try:
+        controller = WarmupController()
+        status = controller.get_warmup_status(sender_email)
+
+        if not status:
+            return jsonify({"error": "Sender not found"}), 404
+
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Failed to get warmup status for {sender_email}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/senders/<path:sender_email>/warmup", methods=["POST"])
+def enable_warmup(sender_email):
+    """Enable warmup for a sender."""
+    from warmup_controller import WarmupController
+
+    data = request.json
+    ramp_schedule = data.get("ramp_schedule", "conservative")
+    warmup_service = data.get("warmup_service")
+    warmup_service_id = data.get("warmup_service_id")
+
+    try:
+        controller = WarmupController()
+        success = controller.enable_warmup(
+            sender_email,
+            ramp_schedule=ramp_schedule,
+            warmup_service=warmup_service,
+            warmup_service_id=warmup_service_id
+        )
+
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": f"Warmup enabled for {sender_email}",
+                "ramp_schedule": ramp_schedule
+            })
+        else:
+            return jsonify({"error": "Failed to enable warmup"}), 400
+
+    except Exception as e:
+        logger.error(f"Failed to enable warmup for {sender_email}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/senders/<path:sender_email>/warmup", methods=["DELETE"])
+def disable_warmup(sender_email):
+    """Disable warmup for a sender."""
+    from warmup_controller import WarmupController
+
+    try:
+        controller = WarmupController()
+        success = controller.disable_warmup(sender_email)
+
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": f"Warmup disabled for {sender_email}"
+            })
+        else:
+            return jsonify({"error": "Failed to disable warmup"}), 400
+
+    except Exception as e:
+        logger.error(f"Failed to disable warmup for {sender_email}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/warmup/status", methods=["GET"])
+def get_all_warmup_status():
+    """Get warmup status for all senders with warmup enabled."""
+    from warmup_controller import WarmupController
+
+    try:
+        controller = WarmupController()
+        statuses = controller.get_all_warmup_senders()
+
+        return jsonify({
+            "senders": statuses,
+            "total": len(statuses)
+        })
+    except Exception as e:
+        logger.error(f"Failed to get warmup statuses: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sequences/<sequence_id>/settings", methods=["GET"])
+def get_sequence_settings(sequence_id):
+    """Get sequence settings (personalization mode, signature toggle)."""
+    from lead_registry import get_connection
+
+    conn = get_connection()
+    try:
+        settings = conn.execute("""
+            SELECT * FROM sequence_settings WHERE sequence_id = ?
+        """, (sequence_id,)).fetchone()
+
+        conn.close()
+
+        if settings:
+            return jsonify(dict(settings))
+        else:
+            # Return defaults
+            return jsonify({
+                "sequence_id": sequence_id,
+                "personalization_mode": "signal_based",
+                "include_signature": 1
+            })
+    except Exception as e:
+        logger.error(f"Failed to get sequence settings: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sequences/<sequence_id>/settings", methods=["PUT"])
+def update_sequence_settings(sequence_id):
+    """Update sequence settings."""
+    from lead_registry import get_connection
+
+    data = request.json
+    personalization_mode = data.get("personalization_mode", "signal_based")
+    include_signature = data.get("include_signature", 1)
+
+    conn = get_connection()
+    try:
+        conn.execute("""
+            INSERT INTO sequence_settings (sequence_id, personalization_mode, include_signature)
+            VALUES (?, ?, ?)
+            ON CONFLICT(sequence_id) DO UPDATE SET
+                personalization_mode = excluded.personalization_mode,
+                include_signature = excluded.include_signature
+        """, (sequence_id, personalization_mode, include_signature))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Updated settings for sequence {sequence_id}")
+        return jsonify({"status": "success"})
+    except Exception as e:
+        logger.error(f"Failed to update sequence settings: {e}")
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+# ====================
+# WEBSITE VISITOR TRACKING ENDPOINTS
+# ====================
+
+# 1x1 transparent GIF for tracking pixel
+TRACKING_PIXEL = b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b'
+
+
+@app.route("/api/track/pixel.gif", methods=["GET", "OPTIONS"])
+def tracking_pixel():
+    """1x1 transparent GIF tracking pixel for external websites."""
+    from flask import Response, make_response
+    from visitor_tracking import record_visit
+
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        return response
+
+    # Get visitor info from request
+    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if ip_address and "," in ip_address:
+        ip_address = ip_address.split(",")[0].strip()
+
+    page_url = request.args.get("url", "")
+    referrer = request.args.get("ref", request.headers.get("Referer", ""))
+    user_agent = request.headers.get("User-Agent", "")
+    session_id = request.args.get("sid", None)
+
+    # Record the visit asynchronously (non-blocking)
+    try:
+        record_visit(
+            ip_address=ip_address,
+            page_url=page_url,
+            referrer=referrer,
+            user_agent=user_agent,
+            session_id=session_id
+        )
+    except Exception as e:
+        logger.error(f"Failed to record visit: {e}")
+
+    # Return tracking pixel
+    response = Response(TRACKING_PIXEL, mimetype="image/gif")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+
+@app.route("/api/track/script.js", methods=["GET"])
+def tracking_script():
+    """JavaScript tracking snippet for external websites."""
+    from flask import Response
+
+    backend_url = Config.BASE_URL
+
+    script = f'''
+(function() {{
+    var _vt = window._vt || [];
+    var sessionId = localStorage.getItem('_vt_sid');
+    if (!sessionId) {{
+        sessionId = 'sid_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+        localStorage.setItem('_vt_sid', sessionId);
+    }}
+
+    function trackPageView() {{
+        var img = new Image();
+        var params = [
+            'url=' + encodeURIComponent(window.location.href),
+            'ref=' + encodeURIComponent(document.referrer || ''),
+            'sid=' + encodeURIComponent(sessionId),
+            't=' + Date.now()
+        ];
+        img.src = '{backend_url}/api/track/pixel.gif?' + params.join('&');
+    }}
+
+    // Track initial page view
+    if (document.readyState === 'complete') {{
+        trackPageView();
+    }} else {{
+        window.addEventListener('load', trackPageView);
+    }}
+
+    // Track SPA navigation (pushState)
+    var originalPushState = history.pushState;
+    history.pushState = function() {{
+        originalPushState.apply(history, arguments);
+        setTimeout(trackPageView, 100);
+    }};
+
+    window.addEventListener('popstate', function() {{
+        setTimeout(trackPageView, 100);
+    }});
+
+    window._vt = {{ track: trackPageView, sessionId: sessionId }};
+}})();
+'''
+
+    response = Response(script, mimetype="application/javascript")
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+
+@app.route("/api/track/visit", methods=["POST", "OPTIONS"])
+def track_visit():
+    """Record a visitor event from the tracking script."""
+    from visitor_tracking import record_visit
+
+    if request.method == "OPTIONS":
+        return "", 204
+
+    data = request.json or {}
+
+    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if ip_address and "," in ip_address:
+        ip_address = ip_address.split(",")[0].strip()
+
+    result = record_visit(
+        ip_address=ip_address,
+        page_url=data.get("url", ""),
+        referrer=data.get("referrer", ""),
+        user_agent=request.headers.get("User-Agent", ""),
+        session_id=data.get("session_id")
+    )
+
+    if result.get("success"):
+        return "", 204
+    else:
+        return jsonify(result), 429 if result.get("error") == "rate_limited" else 500
+
+
+@app.route("/api/visitors", methods=["GET"])
+def list_visitors():
+    """List identified visitor companies with filtering."""
+    from visitor_reconciliation import get_visitor_companies
+
+    limit = int(request.args.get("limit", 50))
+    offset = int(request.args.get("offset", 0))
+    source = request.args.get("source")
+    min_visits = request.args.get("min_visits")
+    days = request.args.get("days")
+    enriched_only = request.args.get("enriched") == "true"
+
+    result = get_visitor_companies(
+        limit=limit,
+        offset=offset,
+        source=source,
+        min_visits=int(min_visits) if min_visits else None,
+        days=int(days) if days else None,
+        enriched_only=enriched_only
+    )
+
+    return jsonify(result)
+
+
+@app.route("/api/visitors/<company_key>", methods=["GET"])
+def visitor_detail(company_key):
+    """Get detailed visitor company info with visit history."""
+    from visitor_reconciliation import get_visitor_company_detail
+
+    detail = get_visitor_company_detail(company_key)
+
+    if not detail:
+        return jsonify({"error": "Visitor company not found"}), 404
+
+    return jsonify(detail)
+
+
+@app.route("/api/visitors/analytics", methods=["GET"])
+def visitor_analytics():
+    """Aggregated visitor analytics."""
+    from visitor_tracking import get_visitor_stats
+    from visitor_reconciliation import get_reconciliation_stats
+
+    tracking_stats = get_visitor_stats()
+    reconciliation_stats = get_reconciliation_stats()
+
+    return jsonify({
+        "tracking": tracking_stats,
+        "reconciliation": reconciliation_stats
+    })
+
+
+@app.route("/api/visitors/<company_key>/find-contacts", methods=["POST"])
+def visitor_find_contacts(company_key):
+    """Trigger Apollo enrichment for a visitor company."""
+    from visitor_reconciliation import get_visitor_company_detail
+    from lead_registry import get_connection
+
+    detail = get_visitor_company_detail(company_key)
+    if not detail:
+        return jsonify({"error": "Visitor company not found"}), 404
+
+    domain = detail.get("domain")
+    if not domain:
+        return jsonify({"error": "No domain available for company"}), 400
+
+    # TODO: Implement Apollo company search by domain
+    # For now, mark as enrichment requested
+    conn = get_connection()
+    try:
+        conn.execute("""
+            UPDATE visitor_companies SET apollo_enriched = 1, updated_at = ?
+            WHERE company_key = ?
+        """, (utc_now(), company_key))
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({
+        "status": "queued",
+        "message": f"Enrichment queued for domain: {domain}",
+        "company_key": company_key
+    })
+
+
+@app.route("/api/integrations/leadfeeder/status", methods=["GET"])
+def leadfeeder_status():
+    """Check Leadfeeder integration status."""
+    from leadfeeder_scraper import get_leadfeeder_status
+
+    status = get_leadfeeder_status()
+    return jsonify(status)
+
+
+@app.route("/api/integrations/leadfeeder/sync", methods=["POST"])
+def leadfeeder_manual_sync():
+    """Manually trigger Leadfeeder scrape."""
+    from leadfeeder_scraper import scrape_leadfeeder
+
+    result = scrape_leadfeeder()
+    return jsonify(result)
+
+
+@app.route("/api/scheduler/status", methods=["GET"])
+def scheduler_status():
+    """Get background job scheduler status."""
+    from scheduler import get_scheduler_status
+
+    status = get_scheduler_status()
+    return jsonify(status)
+
+
+@app.route("/api/scheduler/jobs", methods=["GET"])
+def list_scheduled_jobs():
+    """List all scheduled jobs and their status."""
+    from scheduler import get_scheduler_status, get_job_history
+
+    status = get_scheduler_status()
+    history = get_job_history(limit=20)
+
+    return jsonify({
+        "scheduler": status,
+        "history": history
+    })
+
+
+@app.route("/api/scheduler/jobs/<job_id>/run", methods=["POST"])
+def run_job_manually(job_id):
+    """Manually trigger a scheduled job."""
+    from scheduler import run_job_now
+
+    result = run_job_now(job_id)
+    return jsonify(result)
+
+
+# Initialize scheduler on app start
+def init_visitor_scheduler():
+    """Initialize the background scheduler for visitor tracking jobs."""
+    from scheduler import start_scheduler
+    try:
+        start_scheduler()
+        logger.info("Visitor tracking scheduler started")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {e}")
+
+
 if __name__ == "__main__":
     ensure_seed_data()
+    init_visitor_scheduler()
     host = "127.0.0.1"
     port = choose_port()
     try:
