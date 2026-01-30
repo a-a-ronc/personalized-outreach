@@ -311,8 +311,15 @@ Deploy to Railway for 24/7 uptime and visitor tracking:
 
 ## Documentation
 
+### Deployment & Configuration
 - **[RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)** - Production deployment guide
+- **[BASE_URL_GUIDE.md](BASE_URL_GUIDE.md)** - Configure BASE_URL from local to production
 - **[MCP_SETUP.md](MCP_SETUP.md)** - Claude Desktop integration setup
+
+### Integrations
+- **[LEADFEEDER_SETUP.md](LEADFEEDER_SETUP.md)** - Website visitor identification with Leadfeeder
+
+### Technical Reference
 - **[IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md)** - Technical documentation
 - **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Pre-launch verification
 
