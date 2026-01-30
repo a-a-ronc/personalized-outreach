@@ -1,6 +1,6 @@
-# Let Nixpacks auto-detect Python and handle venv setup
+# Provide both Python and Node.js, let Nixpacks handle install phase
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["python312", "nodejs_20"]
 
 # Build frontend after Python packages are installed
 [phases.build]
