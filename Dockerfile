@@ -29,5 +29,5 @@ COPY . .
 # Expose port (Railway will override with $PORT)
 EXPOSE 8080
 
-# Start command
-CMD gunicorn wsgi:app --bind 0.0.0.0:$PORT --timeout 120 --workers 2
+# Start command - use shell form to expand $PORT
+CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-8080} --timeout 120 --workers 2"]
