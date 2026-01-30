@@ -1,24 +1,8 @@
 #!/bin/bash
+set -e
 
-echo "🚀 Starting Personalized Outreach Platform..."
+# Use PORT from environment or default to 8080
+PORT=${PORT:-8080}
 
-# Run database migration
-echo "📊 Running database migration..."
-python migrate_db.py
-
-# Start backend server
-echo "🔧 Starting backend server on port 7000..."
-python backend/app.py &
-
-# Wait for backend to be ready
-sleep 3
-
-echo "✅ Platform is ready!"
-echo "📱 Backend API: http://localhost:7000"
-echo "🎨 Dashboard: Open dashboard/index.html in browser"
-echo ""
-echo "To test all endpoints, run: python test_backend.py"
-echo ""
-
-# Keep script running
-wait
+echo "Starting gunicorn on port $PORT"
+exec gunicorn wsgi:app --bind 0.0.0.0:$PORT --timeout 120 --workers 2

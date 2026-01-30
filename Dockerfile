@@ -26,8 +26,11 @@ RUN cd dashboard && npm run build
 # Copy rest of application
 COPY . .
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 # Expose port (Railway will override with $PORT)
 EXPOSE 8080
 
-# Start command - use shell form to expand $PORT
-CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-8080} --timeout 120 --workers 2"]
+# Start command
+CMD ["./start.sh"]
