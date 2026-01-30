@@ -1960,8 +1960,8 @@ textarea {
 
 .template-actions button {
   flex: 1;
-  padding: var(--space-2) var(--space-3);
-  font-size: 13px;
+  padding: var(--space-2) var(--space-3) !important;
+  font-size: 13px !important;
   min-height: 38px;
 }
 
