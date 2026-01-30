@@ -16,7 +16,24 @@
       "Bash(python migrate_db.py:*)",
       "Bash(\"C:\\\\Users\\\\AaronCendejas\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" migrate_db.py)",
       "Bash(chmod:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(curl:*)",
+      "Bash(\"C:\\\\Users\\\\AaronCendejas\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" app.py)",
+      "Bash(npm run dev:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(where:*)",
+      "Bash(netstat:*)",
+      "Bash(dir:*)",
+      "Bash(cmd //c \"taskkill /PID 14004 /F\")",
+      "Bash(sqlite3:*)",
+      "Bash(python -c:*)",
+      "Bash(python3:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix Railway deployment: serve React frontend from Flask\n\n- Add nixpacks.toml to build frontend during deployment\n- Configure Flask to serve static files from dashboard/dist\n- Add catch-all route for React Router client-side routing\n- Update .railwayignore to deploy built frontend\n- Configure Vite for production API URLs\n\nFixes 404 errors by ensuring frontend is built and served correctly.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix nixpacks build: use python -m pip instead of pip\n\nNixpacks virtual environment doesn''t have pip in PATH by default.\nUse python -m pip to install requirements and move frontend build\nto build phase for proper sequencing.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)"
     ]
   }
 }

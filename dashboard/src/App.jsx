@@ -2,8 +2,50 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import EmailPreview from "./components/EmailPreview";
 import SequenceBuilder from "./components/SequenceBuilder";
 import VariableAutocomplete from "./components/VariableAutocomplete";
+import SequenceTemplates from "./components/SequenceTemplates";
+import UnifiedInbox from "./components/UnifiedInbox";
+import PeopleTable from "./components/PeopleTable";
+import SendersManagement from "./components/SendersManagement";
+import VisitorTable from "./components/VisitorTable";
+import VisitorAnalytics from "./components/VisitorAnalytics";
 
 const API_BASE_DEFAULT = import.meta.env.VITE_API_URL || "http://127.0.0.1:7000";
+
+// Apollo-style 4-section navigation
+const SECTIONS = [
+  {
+    id: "sequences",
+    label: "Sequences",
+    icon: "⚡",
+    subsections: ["Templates", "Builder", "Preview"]
+  },
+  {
+    id: "inbox",
+    label: "Inbox",
+    icon: "📥",
+    subsections: []
+  },
+  {
+    id: "people",
+    label: "People",
+    icon: "👥",
+    subsections: []
+  },
+  {
+    id: "visitors",
+    label: "Visitors",
+    icon: "🌐",
+    subsections: ["Companies", "Analytics"]
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    icon: "⚙️",
+    subsections: ["Senders", "Content", "Tracking", "Analytics"]
+  }
+];
+
+// Legacy tabs (kept for backward compatibility with existing content views)
 const TABS = ["Audience", "Content", "Sequence", "Emails", "Statistics", "Settings"];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -131,7 +173,32 @@ function computeSampleSize({ baselineRate, minDetectableEffect, alpha, power }) 
 function App() {
   const [campaigns, setCampaigns] = useState([]);
   const [activeId, setActiveId] = useState("");
+
+  // Theme state with localStorage persistence
+  const [theme, setTheme] = useState(() => {
+    const saved = window.localStorage.getItem("theme");
+    if (saved) return saved;
+    // Check system preference
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    window.localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === "dark" ? "light" : "dark");
+  };
+
+  // Apollo-style navigation state
+  const [activeSection, setActiveSection] = useState("sequences");
+  const [activeSubsection, setActiveSubsection] = useState("Templates");
+
+  // Legacy tab state (for backward compatibility)
   const [activeTab, setActiveTab] = useState("Audience");
+
   const [apiBase, setApiBase] = useState(
     () => window.localStorage.getItem("apiBase") || API_BASE_DEFAULT
   );
@@ -164,6 +231,9 @@ function App() {
     power: 0.8
   });
   const [senders, setSenders] = useState([]);
+  const [editedSignatures, setEditedSignatures] = useState({});
+  const [editedPersonas, setEditedPersonas] = useState({});
+  const [savingSender, setSavingSender] = useState(null);
   const [variables, setVariables] = useState([]);
   const [contentDraft, setContentDraft] = useState(null);
   const [settingsDraft, setSettingsDraft] = useState(null);
@@ -334,14 +404,16 @@ function App() {
   }, [activeId, activeTab]);
 
   useEffect(() => {
-    if (!["Content", "Sequence"].includes(activeTab)) return;
+    // Fetch variables for both legacy tabs and new Apollo navigation
+    const shouldFetch = ["Content", "Sequence"].includes(activeTab) || activeSection === "sequences";
+    if (!shouldFetch) return;
     fetchApi("/api/variables")
       .then((data) => {
         setVariables(data.variables || []);
         setErrorMessage("");
       })
       .catch((error) => setErrorMessage(error.message));
-  }, [activeTab, fetchApi]);
+  }, [activeTab, activeSection, fetchApi]);
 
   const activeCampaignName = useMemo(() => {
     const active = campaigns.find((item) => item.id === activeId);
@@ -513,6 +585,39 @@ function App() {
     }
   }
 
+  // Handler to save sender signature and persona
+  async function handleSaveSender(senderEmail) {
+    setSavingSender(senderEmail);
+    setErrorMessage("");
+
+    const sender = senders.find(s => s.email === senderEmail);
+    const signatureHtml = editedSignatures[senderEmail] ?? sender?.signature_html ?? "";
+    const personaContext = editedPersonas[senderEmail] ?? sender?.persona_context ?? "";
+
+    try {
+      await fetchApi(`/api/senders/${encodeURIComponent(senderEmail)}/signature`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signature_html: signatureHtml,
+          persona_context: personaContext,
+          full_name: sender?.full_name || "",
+          title: sender?.title || "",
+          phone: sender?.phone || ""
+        })
+      });
+
+      // Refresh senders list
+      const updated = await fetchApi("/api/senders");
+      setSenders(updated);
+      setStatusMessage("Signature saved successfully!");
+    } catch (error) {
+      setErrorMessage(error.message || "Failed to save signature");
+    } finally {
+      setSavingSender(null);
+    }
+  }
+
   function handleGenerateCampaign() {
     setErrorMessage("");
     setStatusMessage("Generating output...");
@@ -634,6 +739,7 @@ function App() {
 
   return (
     <div className="app">
+      {/* Campaign selection sidebar (left) */}
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">PO</span>
@@ -701,47 +807,145 @@ function App() {
         </div>
       </aside>
 
-      <main className="main">
-        <header className="header">
-          <div>
-            <p className="eyebrow">Sequences</p>
-            <h1>{activeCampaignName}</h1>
-            <p className="subtitle">
-              Personalization is the spine. Review structure, cadence, and engagement in one place.
-            </p>
-          </div>
-          <div className="status-card">
-            <div>
-              <p className="status-label">Status</p>
-              <p className="status-value">{campaign?.status || "draft"}</p>
-            </div>
-            <div className="status-stat">
-              <span>Scheduled</span>
-              <strong>{formatNumber(funnel?.scheduled || 0)}</strong>
-            </div>
-            <div className="status-stat">
-              <span>Sent</span>
-              <strong>{formatNumber(funnel?.sent || 0)}</strong>
-            </div>
-          </div>
-        </header>
+      {/* Apollo-style navigation sidebar (center-left) */}
+      <nav className="nav-sidebar">
+          {SECTIONS.map((section) => (
+            <div key={section.id} className="nav-section">
+              <button
+                className={`nav-item ${section.id === activeSection ? "active" : ""}`}
+                onClick={() => {
+                  setActiveSection(section.id);
+                  if (section.subsections.length > 0) {
+                    setActiveSubsection(section.subsections[0]);
+                  }
+                }}
+              >
+                <span className="nav-icon">{section.icon}</span>
+                <span className="nav-label">{section.label}</span>
+              </button>
 
-        <nav className="tabs">
-          {TABS.map((tab) => (
-            <button
-              key={tab}
-              className={`tab ${tab === activeTab ? "active" : ""}`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab}
-            </button>
+              {/* Subsection links */}
+              {section.id === activeSection && section.subsections.length > 0 && (
+                <div className="nav-subsections">
+                  {section.subsections.map((subsection) => (
+                    <button
+                      key={subsection}
+                      className={`nav-subitem ${subsection === activeSubsection ? "active" : ""}`}
+                      onClick={() => setActiveSubsection(subsection)}
+                    >
+                      {subsection}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </nav>
 
         {errorMessage && <div className="alert error">{errorMessage}</div>}
         {statusMessage && <div className="alert success">{statusMessage}</div>}
 
-        <section className="tab-body">
+        {/* Apollo-style main content area */}
+        <main className="main-content">
+          {/* SEQUENCES SECTION */}
+          {activeSection === "sequences" && (
+            <div className="sequences-view">
+              {activeSubsection === "Templates" && (
+                <SequenceTemplates
+                  campaignId={activeId}
+                  fetchApi={fetchApi}
+                  onSelectTemplate={(template) => {
+                    // When user selects a template, switch to Builder
+                    setActiveSubsection("Builder");
+                    // Optionally pre-fill the builder with template data
+                  }}
+                />
+              )}
+
+              {activeSubsection === "Builder" && (
+                <div className="sequence-grid">
+                  <SequenceBuilder
+                    campaignId={activeId}
+                    fetchApi={fetchApi}
+                    variables={variables}
+                  />
+                </div>
+              )}
+
+              {activeSubsection === "Preview" && (
+                <div className="panel">
+                  <div className="panel-header">
+                    <h2>Email Preview</h2>
+                    <span>Render a single lead from the database</span>
+                  </div>
+                  <EmailPreview campaignId={activeId} fetchApi={fetchApi} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* INBOX SECTION */}
+          {activeSection === "inbox" && (
+            <div className="inbox-view">
+              <UnifiedInbox campaignId={activeId} fetchApi={fetchApi} />
+            </div>
+          )}
+
+          {/* PEOPLE SECTION */}
+          {activeSection === "people" && (
+            <div className="people-view">
+              <PeopleTable campaignId={activeId} fetchApi={fetchApi} />
+            </div>
+          )}
+
+          {/* VISITORS SECTION */}
+          {activeSection === "visitors" && (
+            <div className="visitors-view">
+              {(!activeSubsection || activeSubsection === "Companies") && (
+                <VisitorTable fetchApi={fetchApi} />
+              )}
+              {activeSubsection === "Analytics" && (
+                <VisitorAnalytics fetchApi={fetchApi} />
+              )}
+            </div>
+          )}
+
+          {/* SETTINGS SECTION */}
+          {activeSection === "settings" && (
+            <div className="settings-view">
+              {activeSubsection === "Senders" && (
+                <SendersManagement fetchApi={fetchApi} />
+              )}
+
+              {activeSubsection === "Content" && (
+                // Render the old "Content" tab content here
+                <div className="legacy-content">
+                  {/* Content tab rendering will go here */}
+                  <p>Content settings (legacy view)</p>
+                </div>
+              )}
+
+              {activeSubsection === "Tracking" && (
+                // Render the old "Settings" tab content here
+                <div className="legacy-settings">
+                  {/* Settings tab rendering will go here */}
+                  <p>Tracking settings (legacy view)</p>
+                </div>
+              )}
+
+              {activeSubsection === "Analytics" && (
+                // Render the old "Statistics" tab content here
+                <div className="legacy-statistics">
+                  {/* Statistics tab rendering will go here */}
+                  <p>Analytics (legacy view)</p>
+                </div>
+              )}
+            </div>
+          )}
+        </main>
+
+        {/* LEGACY TAB CONTENT - Keep for backward compatibility but hide */}
+        <section className="tab-body" style={{ display: "none" }}>
           {activeTab === "Audience" && (
             <div className="panel">
               <div className="panel-header">
@@ -1703,7 +1907,18 @@ function App() {
             </div>
           )}
         </section>
-      </main>
+
+        {/* Theme Toggle Button */}
+        <div className="theme-toggle">
+          <button
+            className="theme-toggle-btn"
+            onClick={toggleTheme}
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
+        </div>
     </div>
   );
 }

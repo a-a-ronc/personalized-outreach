@@ -1,9 +1,12 @@
 import hashlib
+import logging
 import sqlite3
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from config import Config
+
+logger = logging.getLogger(__name__)
 from lead_scoring import stable_hash, title_bucket, normalize_text
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -208,6 +211,249 @@ def upgrade_schema_v2():
                 updated_at TEXT
             )
         """)
+
+
+def upgrade_schema_v3():
+    """Upgrade database schema to v3 with sequence templates support."""
+    with get_connection() as conn:
+        # Add sender_email column to sequences table
+        try:
+            conn.execute("ALTER TABLE sequences ADD COLUMN sender_email TEXT")
+        except:
+            pass  # Column already exists
+
+        # Create sequence_templates table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sequence_templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                category TEXT,
+                steps TEXT,
+                is_system_template INTEGER DEFAULT 0,
+                created_by TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+
+        # Insert default system templates
+        import json
+        from datetime import datetime
+
+        now = datetime.utcnow().isoformat()
+
+        default_templates = [
+            {
+                "id": "3pl-cold-outreach",
+                "name": "3PL Cold Outreach",
+                "description": "5-step sequence targeting 3PL decision makers with email and phone follow-up",
+                "category": "3pl",
+                "steps": json.dumps([
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_1",
+                        "subject": "Warehouse automation for {{company_name}}",
+                        "body": "Hi {{first_name}},\n\n{{personalization_sentence}}\n\nWe help 3PLs like {{company_name}} automate warehouse operations to cut labor costs by 40% and boost throughput 3x.\n\nWorth a 15-minute call?\n\nBest,\n{{sender_name}}"
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 3
+                    },
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_2",
+                        "subject": "Re: {{company_name}} automation",
+                        "body": "Hi {{first_name}},\n\nFollowing up on my email about warehouse automation for {{company_name}}.\n\nWe recently helped a 200k sq ft 3PL reduce pick times by 60%. Happy to share the case study.\n\nOpen to a quick call this week?\n\n{{sender_name}}"
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 4
+                    },
+                    {
+                        "type": "call",
+                        "delay_days": 0,
+                        "script": "Hi {{first_name}}, this is {{sender_name}} from Intralog. I sent you a couple emails about warehouse automation for {{company_name}}. I wanted to reach out personally because we're seeing great results with 3PLs - our clients are cutting labor costs by 40% on average. Do you have 2 minutes to discuss how this could work for {{company_name}}?"
+                    }
+                ]),
+                "is_system_template": 1,
+                "created_at": now,
+                "updated_at": now
+            },
+            {
+                "id": "warehouse-automation-full",
+                "name": "Warehouse Automation - Full Sequence",
+                "description": "7-step omnichannel sequence with email, call, and LinkedIn outreach",
+                "category": "warehouse_automation",
+                "steps": json.dumps([
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_1",
+                        "subject": "Warehouse automation opportunity at {{company_name}}",
+                        "body": "{{personalization_sentence}}\n\nWe specialize in warehouse automation for companies like {{company_name}}. Our clients typically see 3x throughput gains and 40% labor cost reduction.\n\nOpen to exploring this?\n\n{{sender_name}}"
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 3
+                    },
+                    {
+                        "type": "linkedin_connect",
+                        "delay_days": 0,
+                        "message": "Hi {{first_name}}, I saw your role at {{company_name}} and thought I'd connect. We work with warehouse operations teams on automation projects."
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 2
+                    },
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_2",
+                        "subject": "Re: Warehouse automation at {{company_name}}",
+                        "body": "Hi {{first_name}},\n\nWanted to follow up - are you currently exploring warehouse automation solutions?\n\nWe recently completed a project for a company with similar {{pain_theme}} challenges. Happy to share details.\n\n{{sender_name}}"
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 4
+                    },
+                    {
+                        "type": "call",
+                        "delay_days": 0,
+                        "script": "Hi {{first_name}}, {{sender_name}} from Intralog. Quick call about warehouse automation at {{company_name}}. I know {{pain_theme}} is a common challenge in your industry. We've helped similar companies achieve 3x throughput gains. Do you have 5 minutes to discuss?"
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 3
+                    },
+                    {
+                        "type": "linkedin_message",
+                        "delay_days": 0,
+                        "message": "Hi {{first_name}}, tried to reach you by email and phone about warehouse automation for {{company_name}}. Worth a quick call? Let me know if you're open to discussing."
+                    }
+                ]),
+                "is_system_template": 1,
+                "created_at": now,
+                "updated_at": now
+            },
+            {
+                "id": "quick-email-followup",
+                "name": "Quick Email Follow-up",
+                "description": "Simple 2-email sequence for warm leads or quick outreach",
+                "category": "logistics",
+                "steps": json.dumps([
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_1",
+                        "subject": "Quick question about {{company_name}}",
+                        "body": "Hi {{first_name}},\n\n{{personalization_sentence}}\n\nWe help logistics companies like {{company_name}} streamline operations and cut costs through automation.\n\nWorth a brief conversation?\n\n{{sender_name}}"
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 4
+                    },
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_2",
+                        "subject": "Re: {{company_name}}",
+                        "body": "Hi {{first_name}},\n\nCircling back on my previous email. We've been helping companies in your space achieve significant operational improvements.\n\nOpen to a 10-minute intro call?\n\n{{sender_name}}"
+                    }
+                ]),
+                "is_system_template": 1,
+                "created_at": now,
+                "updated_at": now
+            },
+            {
+                "id": "enterprise-multi-touch",
+                "name": "Enterprise Multi-Touch",
+                "description": "9-step enterprise sequence with all channels for high-value accounts",
+                "category": "warehouse_automation",
+                "steps": json.dumps([
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_1"
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 2
+                    },
+                    {
+                        "type": "linkedin_connect",
+                        "delay_days": 0,
+                        "message": "Hi {{first_name}}, reaching out regarding warehouse automation opportunities at {{company_name}}."
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 3
+                    },
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_2"
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 3
+                    },
+                    {
+                        "type": "call",
+                        "delay_days": 0,
+                        "script": "Enterprise-focused call script for {{first_name}} at {{company_name}} regarding {{pain_theme}}."
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 2
+                    },
+                    {
+                        "type": "linkedin_message",
+                        "delay_days": 0,
+                        "message": "Following up on my outreach - would love to connect about automation at {{company_name}}."
+                    },
+                    {
+                        "type": "wait",
+                        "delay_days": 5
+                    },
+                    {
+                        "type": "email",
+                        "delay_days": 0,
+                        "template": "email_1",
+                        "subject": "Final follow-up: {{company_name}} automation",
+                        "body": "Hi {{first_name}},\n\nLast follow-up from me. If warehouse automation isn't a priority right now, totally understand.\n\nIf it becomes relevant in the future, feel free to reach out.\n\n{{sender_name}}"
+                    }
+                ]),
+                "is_system_template": 1,
+                "created_at": now,
+                "updated_at": now
+            }
+        ]
+
+        # Insert templates only if they don't exist
+        for template in default_templates:
+            existing = conn.execute(
+                "SELECT id FROM sequence_templates WHERE id = ?",
+                (template["id"],)
+            ).fetchone()
+
+            if not existing:
+                conn.execute("""
+                    INSERT INTO sequence_templates
+                    (id, name, description, category, steps, is_system_template, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    template["id"],
+                    template["name"],
+                    template["description"],
+                    template["category"],
+                    template["steps"],
+                    template["is_system_template"],
+                    template["created_at"],
+                    template["updated_at"]
+                ))
 
 
 def normalize_email(email: str) -> str:
@@ -595,3 +841,320 @@ def get_people_for_campaign(campaign_id: str) -> list[dict]:
 def calculate_enrichment_hash(person_key: str, reveal_personal_emails: bool, reveal_phone_number: bool) -> str:
     payload = f"{person_key}|{int(reveal_personal_emails)}|{int(reveal_phone_number)}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def upgrade_schema_v4():
+    """Upgrade database schema to v4 with editable sender signatures and sequence settings."""
+    with get_connection() as conn:
+        # Create sender_signatures table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sender_signatures (
+                email TEXT PRIMARY KEY,
+                full_name TEXT NOT NULL,
+                title TEXT NOT NULL,
+                company TEXT,
+                phone TEXT,
+                signature_html TEXT,
+                persona_context TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+
+        # Create sequence_settings table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sequence_settings (
+                sequence_id TEXT PRIMARY KEY,
+                personalization_mode TEXT DEFAULT 'signal_based',
+                include_signature INTEGER DEFAULT 1,
+                FOREIGN KEY (sequence_id) REFERENCES sequences(id)
+            )
+        """)
+
+        # Initialize sender signatures from config if not exists
+        from config import Config
+        from datetime import datetime
+        now = datetime.utcnow().isoformat() + "Z"
+
+        for profile in Config.SENDER_PROFILES:
+            conn.execute("""
+                INSERT OR IGNORE INTO sender_signatures
+                (email, full_name, title, company, phone, signature_html, persona_context, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                profile["email"],
+                profile["full_name"],
+                profile["title"],
+                profile.get("company", "Intralog"),
+                profile.get("phone", ""),
+                profile.get("signature", ""),
+                "",  # persona_context will be added later
+                now,
+                now
+            ))
+
+        logger.info("✓ Schema upgraded to v4: sender_signatures and sequence_settings tables created")
+
+
+def upgrade_schema_v5():
+    """Upgrade database schema to v5 with sender warmup settings and email tracking."""
+    with get_connection() as conn:
+        # Add warmup columns to sender_signatures if they don't exist
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN warmup_enabled INTEGER DEFAULT 0")
+            logger.info("Added warmup_enabled column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN daily_limit INTEGER DEFAULT 50")
+            logger.info("Added daily_limit column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN ramp_schedule TEXT DEFAULT 'conservative'")
+            logger.info("Added ramp_schedule column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN signature_text TEXT")
+            logger.info("Added signature_text column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN warmup_started_at TEXT")
+            logger.info("Added warmup_started_at column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        # Create emails table if not exists for tracking sent emails
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS emails (
+                id TEXT PRIMARY KEY,
+                campaign_id TEXT,
+                sequence_id TEXT,
+                lead_id TEXT,
+                sender_email TEXT,
+                recipient_email TEXT,
+                subject TEXT,
+                body_html TEXT,
+                body_plain TEXT,
+                status TEXT DEFAULT 'pending',
+                sent_at TEXT,
+                opened_at TEXT,
+                clicked_at TEXT,
+                replied_at TEXT,
+                bounced_at TEXT,
+                created_at TEXT,
+                FOREIGN KEY (lead_id) REFERENCES leads(id),
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+            )
+        """)
+
+        # Create indexes for faster queries
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_emails_sender ON emails(sender_email)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_emails_status ON emails(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_emails_lead ON emails(lead_id)")
+
+        logger.info("✓ Schema upgraded to v5: sender warmup settings and emails tracking table")
+
+
+def upgrade_schema_v6():
+    """Upgrade database schema to v6 with website visitor identification tables."""
+    with get_connection() as conn:
+        # Raw visitor tracking data - stores all visits permanently
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS visitor_raw (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                visit_id TEXT UNIQUE,
+                ip_address TEXT,
+                user_agent TEXT,
+                page_url TEXT,
+                referrer TEXT,
+                session_id TEXT,
+                timestamp TEXT,
+                created_at TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_raw_ip ON visitor_raw(ip_address)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_raw_timestamp ON visitor_raw(timestamp)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_raw_session ON visitor_raw(session_id)")
+
+        # MaxMind/DIY IP resolution results
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS visitor_ip_resolution (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_address TEXT,
+                source TEXT,
+                company_name TEXT,
+                domain TEXT,
+                industry TEXT,
+                employee_count INTEGER,
+                city TEXT,
+                region TEXT,
+                country TEXT,
+                isp TEXT,
+                organization TEXT,
+                is_datacenter INTEGER DEFAULT 0,
+                is_vpn INTEGER DEFAULT 0,
+                confidence_score REAL,
+                resolved_at TEXT,
+                raw_response TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_ip_resolution_ip ON visitor_ip_resolution(ip_address)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_ip_resolution_domain ON visitor_ip_resolution(domain)")
+
+        # Leadfeeder scraped data
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS leadfeeder_visits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                leadfeeder_id TEXT UNIQUE,
+                company_name TEXT,
+                domain TEXT,
+                industry TEXT,
+                employee_count INTEGER,
+                country TEXT,
+                page_views INTEGER,
+                visit_duration INTEGER,
+                first_visit_at TEXT,
+                last_visit_at TEXT,
+                pages_visited TEXT,
+                referrer TEXT,
+                scraped_at TEXT,
+                expires_at TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_leadfeeder_visits_domain ON leadfeeder_visits(domain)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_leadfeeder_visits_expires ON leadfeeder_visits(expires_at)")
+
+        # Reconciled visitor companies (final identified companies)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS visitor_companies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_key TEXT UNIQUE,
+                company_name TEXT,
+                domain TEXT,
+                industry TEXT,
+                employee_count INTEGER,
+                country TEXT,
+                source TEXT,
+                confidence_score REAL,
+                total_visits INTEGER DEFAULT 0,
+                total_page_views INTEGER DEFAULT 0,
+                first_visit_at TEXT,
+                last_visit_at TEXT,
+                apollo_enriched INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_companies_domain ON visitor_companies(domain)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_companies_last_visit ON visitor_companies(last_visit_at)")
+
+        # Visit sessions (aggregated visits per company)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS visitor_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                visitor_company_id INTEGER,
+                session_id TEXT,
+                ip_address TEXT,
+                pages TEXT,
+                page_count INTEGER,
+                duration_seconds INTEGER,
+                referrer TEXT,
+                user_agent TEXT,
+                started_at TEXT,
+                ended_at TEXT,
+                FOREIGN KEY (visitor_company_id) REFERENCES visitor_companies(id)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_sessions_company ON visitor_sessions(visitor_company_id)")
+
+        # Scheduled jobs tracking
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_name TEXT UNIQUE,
+                last_run_at TEXT,
+                next_run_at TEXT,
+                status TEXT,
+                error TEXT,
+                run_count INTEGER DEFAULT 0
+            )
+        """)
+
+        # Integration status tracking
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS integration_status (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                integration_name TEXT UNIQUE,
+                status TEXT,
+                last_sync_at TEXT,
+                error_message TEXT,
+                config_valid INTEGER DEFAULT 0
+            )
+        """)
+
+        logger.info("✓ Schema upgraded to v6: website visitor identification tables")
+
+
+def upgrade_schema_v7():
+    """Upgrade database schema to v7 with email warmup tracking tables."""
+    with get_connection() as conn:
+        # Warmup sends tracking - records every email sent (warmup + campaign)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS warmup_sends (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_email TEXT NOT NULL,
+                recipient_email TEXT,
+                send_type TEXT DEFAULT 'campaign',
+                warmup_day INTEGER,
+                sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'sent',
+                FOREIGN KEY (sender_email) REFERENCES sender_signatures(email)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_warmup_sends_sender ON warmup_sends(sender_email)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_warmup_sends_date ON warmup_sends(sent_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_warmup_sends_type ON warmup_sends(send_type)")
+
+        # Add warmup_day column to sender_signatures if it doesn't exist
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN warmup_day INTEGER DEFAULT 1")
+            logger.info("Added warmup_day column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        # Add current_daily_limit column (calculated from schedule)
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN current_daily_limit INTEGER DEFAULT 50")
+            logger.info("Added current_daily_limit column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        # Add warmup_service column (for future Mailwarm integration)
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN warmup_service TEXT")
+            logger.info("Added warmup_service column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        # Add warmup_service_id column
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN warmup_service_id TEXT")
+            logger.info("Added warmup_service_id column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        # Add last_warmup_check column (for daily advancement)
+        try:
+            conn.execute("ALTER TABLE sender_signatures ADD COLUMN last_warmup_check TEXT")
+            logger.info("Added last_warmup_check column to sender_signatures")
+        except Exception:
+            pass  # Column already exists
+
+        logger.info("✓ Schema upgraded to v7: email warmup tracking tables")

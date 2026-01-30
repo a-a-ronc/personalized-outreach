@@ -17,6 +17,12 @@ Multi-channel outreach automation with AI personalization, voice calls, LinkedIn
 - **Background Jobs**: APScheduler for automated data collection
 - **Find Contacts**: Apollo enrichment for identified companies
 
+### Claude Desktop Integration (NEW)
+- **MCP Server**: Ask Claude questions about your campaigns directly
+- **Real-time Analytics**: Query visitor stats, campaign performance, and email health
+- **Natural Language**: "Show me visitors from last week" or "Which campaigns have low open rates?"
+- **Read-only Access**: Secure analytics without destructive operations
+
 ### 3 Personalization Modes
 1. **Signal-Based**: Intent data from Apollo (job postings, tech stack, funding)
 2. **Fully Personalized**: AI writes complete email (100-120 words)
@@ -306,6 +312,7 @@ Deploy to Railway for 24/7 uptime and visitor tracking:
 ## Documentation
 
 - **[RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)** - Production deployment guide
+- **[MCP_SETUP.md](MCP_SETUP.md)** - Claude Desktop integration setup
 - **[IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md)** - Technical documentation
 - **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Pre-launch verification
 

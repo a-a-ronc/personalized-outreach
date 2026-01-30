@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def create_sequence(campaign_id, name, steps):
+def create_sequence(campaign_id, name, steps, sender_email=None):
     """
     Create a new sequence.
 
@@ -26,6 +26,7 @@ def create_sequence(campaign_id, name, steps):
                 'script': str (for call),
                 'message': str (for LinkedIn)
             }
+        sender_email: Email of the sequence owner/sender
 
     Returns:
         sequence_id
@@ -35,9 +36,9 @@ def create_sequence(campaign_id, name, steps):
 
     with get_connection() as conn:
         conn.execute("""
-            INSERT INTO sequences (id, campaign_id, name, steps, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (sequence_id, campaign_id, name, json.dumps(steps), now, now))
+            INSERT INTO sequences (id, campaign_id, name, steps, sender_email, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (sequence_id, campaign_id, name, json.dumps(steps), sender_email or "", now, now))
 
         # Insert individual steps for easier querying
         for idx, step in enumerate(steps):
@@ -185,6 +186,7 @@ def send_email_step(record, action_metadata):
     from signature_manager import get_default_signature
     from sendgrid import SendGridAPIClient
     from sendgrid.helpers.mail import Mail, Email, To, Content
+    from warmup_controller import WarmupController
 
     logger.info(f"Sending email to {record['email']}")
 
@@ -263,6 +265,26 @@ def send_email_step(record, action_metadata):
         # Send via SendGrid
         sg = SendGridAPIClient(api_key=Config.SENDGRID_API_KEY)
         sender_profile = Config.get_sender_profile(0)
+        sender_email = sender_profile['email']
+
+        # Check warmup limits before sending
+        warmup_controller = WarmupController()
+        can_send, sends_today, daily_limit = warmup_controller.can_send(sender_email)
+
+        if not can_send:
+            logger.warning(
+                f"Daily limit reached for {sender_email}: {sends_today}/{daily_limit}. "
+                f"Skipping send to {record['email']}"
+            )
+            conn = get_connection()
+            conn.execute("""
+                UPDATE outreach_log
+                SET status = 'throttled',
+                    next_action_at = datetime('now', '+1 day')
+                WHERE id = ?
+            """, (record['id'],))
+            conn.close()
+            return
 
         mail = Mail(
             from_email=Email(sender_profile['email'], sender_profile['full_name']),
@@ -283,7 +305,14 @@ def send_email_step(record, action_metadata):
             """, (utc_now(), record['id']))
             conn.close()
 
-            logger.info(f"Email sent successfully to {record['email']}")
+            # Record send for warmup tracking
+            warmup_controller.record_send(
+                sender_email=sender_email,
+                recipient_email=record['email'],
+                send_type='campaign'
+            )
+
+            logger.info(f"Email sent successfully to {record['email']} (warmup: {sends_today + 1}/{daily_limit})")
         else:
             logger.error(f"SendGrid returned status {response.status_code}")
             conn = get_connection()

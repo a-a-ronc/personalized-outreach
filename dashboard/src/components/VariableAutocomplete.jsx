@@ -29,6 +29,8 @@ function VariableAutocomplete({
   const inputRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const list = variables || EMPTY_LIST;
   const safeValue = value ?? "";
 
@@ -67,15 +69,76 @@ function VariableAutocomplete({
 
     const start = target.selectionStart ?? safeValue.length;
     const end = target.selectionEnd ?? safeValue.length;
-    const next = `${safeValue.slice(0, start)}${token}${safeValue.slice(end)}`;
+
+    // If dropdown was triggered by {{, replace the {{ with the full token
+    const textBefore = safeValue.slice(0, start);
+    const hasBrackets = textBefore.endsWith('{{');
+    const replaceStart = hasBrackets ? start - 2 : start;
+
+    const next = `${safeValue.slice(0, replaceStart)}${token}${safeValue.slice(end)}`;
     onChange?.(next);
     requestAnimationFrame(() => {
       target.focus();
-      const caret = start + token.length;
+      const caret = replaceStart + token.length;
       target.setSelectionRange(caret, caret);
     });
     setOpen(false);
     setQuery("");
+  };
+
+  const handleInputChange = (event) => {
+    const newValue = event.target.value;
+    const target = event.target;
+    const cursorPos = target.selectionStart;
+
+    // Check if user just typed {{
+    if (newValue.length > safeValue.length && cursorPos >= 2) {
+      const textBefore = newValue.slice(0, cursorPos);
+      if (textBefore.endsWith('{{')) {
+        // Apollo-style: Show dropdown when {{ is typed
+        setOpen(true);
+        setQuery("");
+        setSelectedIndex(0);
+
+        // Calculate dropdown position near cursor
+        const rect = target.getBoundingClientRect();
+        setDropdownPosition({
+          top: rect.top + 30,
+          left: rect.left
+        });
+      }
+    }
+
+    onChange?.(newValue);
+  };
+
+  const handleKeyDown = (event) => {
+    if (!open) return;
+
+    const flatList = filtered;
+    const maxIndex = flatList.length - 1;
+
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        setSelectedIndex(prev => (prev < maxIndex ? prev + 1 : 0));
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        setSelectedIndex(prev => (prev > 0 ? prev - 1 : maxIndex));
+        break;
+      case 'Enter':
+        if (flatList[selectedIndex]) {
+          event.preventDefault();
+          handleInsert(flatList[selectedIndex].name);
+        }
+        break;
+      case 'Escape':
+        event.preventDefault();
+        setOpen(false);
+        setQuery("");
+        break;
+    }
   };
 
   const InputTag = multiline ? "textarea" : "input";
@@ -97,20 +160,22 @@ function VariableAutocomplete({
         id={id}
         ref={inputRef}
         value={safeValue}
-        onChange={(event) => onChange?.(event.target.value)}
+        onChange={handleInputChange}
+        onKeyDown={handleKeyDown}
         placeholder={placeholder}
         rows={multiline ? rows : undefined}
         disabled={disabled}
         type={multiline ? undefined : "text"}
       />
       {open && (
-        <div className="variable-dropdown">
+        <div className="variable-dropdown apollo-dropdown">
           <input
             className="variable-search"
             type="search"
-            placeholder="Search variables"
+            placeholder="Search variables (or type {{)"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            autoFocus
           />
           {grouped.length === 0 ? (
             <div className="variable-empty">No variables match.</div>
@@ -119,19 +184,24 @@ function VariableAutocomplete({
               <div className="variable-group" key={category}>
                 <div className="variable-group-title">{category}</div>
                 <div className="variable-items">
-                  {items.map((item) => (
-                    <button
-                      className="variable-item"
-                      type="button"
-                      key={`${category}-${item.name}`}
-                      onClick={() => handleInsert(item.name)}
-                    >
-                      <span className="variable-name">{item.name}</span>
-                      {item.example && (
-                        <span className="variable-example">{item.example}</span>
-                      )}
-                    </button>
-                  ))}
+                  {items.map((item) => {
+                    const globalIndex = filtered.findIndex(v => v.name === item.name);
+                    const isSelected = globalIndex === selectedIndex;
+                    return (
+                      <button
+                        className={`variable-item ${isSelected ? 'selected' : ''}`}
+                        type="button"
+                        key={`${category}-${item.name}`}
+                        onClick={() => handleInsert(item.name)}
+                        onMouseEnter={() => setSelectedIndex(globalIndex)}
+                      >
+                        <span className="variable-name">{item.name}</span>
+                        {item.example && (
+                          <span className="variable-example">{item.example}</span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ))

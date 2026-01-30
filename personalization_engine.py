@@ -11,6 +11,31 @@ from config import Config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Sender Personas for AI Personalization
+SENDER_PERSONAS = {
+    "mark@intralog.io": {
+        "name": "Mark Westover",
+        "title": "CEO",
+        "background": "Over 30 years of experience in manufacturing and industrial operations. Executive-level perspective on operational efficiency and ROI.",
+        "tone": "executive",
+        "focus": "Strategic ROI and business outcomes"
+    },
+    "aaron@intralog.io": {
+        "name": "Aaron Cendejas",
+        "title": "Senior Systems Engineer",
+        "background": "Mechanical engineering background with deep expertise in automation systems, conveyors, sortation, and warehouse control systems.",
+        "tone": "technical",
+        "focus": "Technical implementation and automation engineering"
+    },
+    "michael@intralog.io": {
+        "name": "Michael Schulte",
+        "title": "VP of Engineering",
+        "background": "Data scientist with industrial engineering knowledge. Focuses on data-driven optimization and analytics.",
+        "tone": "analytical",
+        "focus": "Data-driven decision making and process optimization"
+    }
+}
+
 
 def load_prompt_template():
     """Load the personalization prompt template"""

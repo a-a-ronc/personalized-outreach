@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+*.env
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node modules (will be installed in container)
+dashboard/node_modules/
+dashboard/dist/
+
+# Test and temp
+test_output/
+output/
+temp/
+tmp/
+
+# Documentation
+*.md
+!README.md
+
+# Selenium
+.wdm/
+chromedriver*
+geckodriver*
+
+# Claude
+.claude/
+
+# Data uploads (created at runtime)
+data/uploads/
+data/*.mmdb

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import VariableAutocomplete from "./VariableAutocomplete";
+import EmailLivePreview from "./EmailLivePreview";
 
 const STEP_TYPES = [
   { value: "email", label: "Email" },
@@ -35,11 +36,28 @@ function SequenceBuilder({ campaignId, fetchApi, variables }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const [senders, setSenders] = useState([]);
+  const [selectedSender, setSelectedSender] = useState("");
+  const [personalizationMode, setPersonalizationMode] = useState("signal_based");
+  const [includeSignature, setIncludeSignature] = useState(true);
 
   const totalDelay = useMemo(
     () => steps.reduce((acc, step) => acc + Number(step.delay_days || 0), 0),
     [steps]
   );
+
+  // Fetch available senders
+  useEffect(() => {
+    fetchApi("/api/senders")
+      .then((data) => {
+        setSenders(data || []);
+        // Set default sender to first one if not already set
+        if (data && data.length > 0 && !selectedSender) {
+          setSelectedSender(data[0].email);
+        }
+      })
+      .catch(() => setSenders([]));
+  }, [fetchApi]);
 
   useEffect(() => {
     if (!campaignId) return;
@@ -52,6 +70,10 @@ function SequenceBuilder({ campaignId, fetchApi, variables }) {
         if (!active) return;
         setName(data.name || `Sequence for ${campaignId}`);
         setSteps(withUiIds(data.steps || []));
+        // Load saved sender if available
+        if (data.sender_email) {
+          setSelectedSender(data.sender_email);
+        }
       })
       .catch((err) => {
         if (!active) return;
@@ -123,7 +145,11 @@ function SequenceBuilder({ campaignId, fetchApi, variables }) {
       await fetchApi(`/api/campaigns/${campaignId}/sequence`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() || `Sequence for ${campaignId}`, steps: stripUiIds(steps) })
+        body: JSON.stringify({
+          name: name.trim() || `Sequence for ${campaignId}`,
+          steps: stripUiIds(steps),
+          sender_email: selectedSender
+        })
       });
       setStatusMessage("Sequence saved.");
     } catch (err) {
@@ -134,9 +160,16 @@ function SequenceBuilder({ campaignId, fetchApi, variables }) {
     }
   };
 
+  // Find the first email step for preview
+  const currentEmailStep = useMemo(() => {
+    return steps.find(step => step.type === "email") || { subject: "", body: "" };
+  }, [steps]);
+
   return (
-    <div className="sequence-builder">
-      <div className="sequence-header">
+    <div className="sequence-builder-layout">
+      <div className="builder-panel">
+        <div className="sequence-builder">
+          <div className="sequence-header">
         <div>
           <h2>Sequence builder</h2>
           <p className="muted">
@@ -164,6 +197,20 @@ function SequenceBuilder({ campaignId, fetchApi, variables }) {
             onChange={(event) => setName(event.target.value)}
             placeholder="Outbound sequence"
           />
+        </label>
+        <label>
+          Sequence owner
+          <select
+            value={selectedSender}
+            onChange={(event) => setSelectedSender(event.target.value)}
+            className="sender-select"
+          >
+            {senders.map((sender) => (
+              <option key={sender.email} value={sender.email}>
+                {sender.name} ({sender.title}) - {sender.email}
+              </option>
+            ))}
+          </select>
         </label>
         <button
           className="primary-button"
@@ -258,19 +305,71 @@ function SequenceBuilder({ campaignId, fetchApi, variables }) {
                     </label>
 
                     {step.type === "email" && (
-                      <label>
-                        Template
-                        <select
-                          value={step.template || EMAIL_TEMPLATES[0]}
-                          onChange={(event) => updateStep(index, { template: event.target.value })}
-                        >
-                          {EMAIL_TEMPLATES.map((template) => (
-                            <option key={template} value={template}>
-                              {template}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <>
+                        <div className="email-settings-row">
+                          <div className="personalization-mode-selector">
+                            <label>
+                              Personalization mode
+                              <select
+                                value={personalizationMode}
+                                onChange={(e) => setPersonalizationMode(e.target.value)}
+                                className="prompt-template-select"
+                              >
+                                <option value="signal_based">Signal-based personalization</option>
+                                <option value="fully_personalized">Fully personalized email</option>
+                                <option value="personalized_opener">Personalized opener only</option>
+                              </select>
+                            </label>
+
+                            <div className="mode-description">
+                              {personalizationMode === "signal_based" && (
+                                <>
+                                  <p>Uses intent signals (job postings, equipment, WMS) to create relevant openers. Best for high-volume outreach.</p>
+                                  <code className="mode-example">Example: "I noticed Acme recently posted 3 warehouse operations roles..."</code>
+                                </>
+                              )}
+                              {personalizationMode === "fully_personalized" && (
+                                <>
+                                  <p>AI generates complete email body based on lead data and pain points. Best for high-value prospects. Uses more AI credits.</p>
+                                  <code className="mode-example">Example: Complete custom email generated for each recipient</code>
+                                </>
+                              )}
+                              {personalizationMode === "personalized_opener" && (
+                                <>
+                                  <p>AI generates only the first 1-2 sentences, rest uses your template. Balances personalization with consistency. Recommended for most campaigns.</p>
+                                  <code className="mode-example">Example: Custom opener + your template body</code>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <label className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={includeSignature}
+                              onChange={(e) => setIncludeSignature(e.target.checked)}
+                            />
+                            Include signature
+                          </label>
+                        </div>
+
+                        <VariableAutocomplete
+                          label="Subject line"
+                          value={step.subject || ""}
+                          onChange={(value) => updateStep(index, { subject: value })}
+                          variables={variables}
+                          placeholder="Warehouse automation for {{company_name}}"
+                        />
+                        <VariableAutocomplete
+                          label="Email body"
+                          value={step.body || ""}
+                          onChange={(value) => updateStep(index, { body: value })}
+                          variables={variables}
+                          multiline
+                          rows={8}
+                          placeholder="Hi {{first_name}},&#10;&#10;{{personalization_sentence}}&#10;&#10;[Your message here]&#10;&#10;Best,&#10;{{sender_name}}"
+                        />
+                      </>
                     )}
 
                     {step.type === "call" && (
@@ -329,6 +428,19 @@ function SequenceBuilder({ campaignId, fetchApi, variables }) {
           </div>
         </div>
       )}
+        </div>
+      </div>
+
+      {/* Email Preview Panel */}
+      <div className="preview-panel">
+        <EmailLivePreview
+          subject={currentEmailStep.subject || ""}
+          body={currentEmailStep.body || ""}
+          senderEmail={selectedSender}
+          campaignId={campaignId}
+          fetchApi={fetchApi}
+        />
+      </div>
     </div>
   );
 }
