@@ -149,7 +149,15 @@ class LeadfeederScraper:
 
             # Try multiple selector strategies to handle Leadfeeder UI changes
             selector_strategies = [
-                # Modern Leadfeeder selectors
+                # Card-based layout selectors (current Leadfeeder UI)
+                "[role='button'][class*='company']",  # Clickable company cards
+                "div[class*='CompanyCard']",  # Company card divs
+                "div[class*='company-item']",  # Company item divs
+                "div[class*='CompanyListItem']",  # List item pattern
+                "article",  # Semantic article elements
+                "li[class*='company']",  # List items with company class
+                "div[role='button']",  # Generic clickable divs (very broad)
+                # Table-based selectors (older UI)
                 "table tbody tr",  # Generic table rows
                 "[role='row']",  # ARIA table rows
                 ".MuiTableRow-root",  # Material UI table rows
@@ -160,8 +168,8 @@ class LeadfeederScraper:
                 ".leads-list-item, .lead-item",
                 "[class*='LeadRow'], [class*='CompanyRow']",
                 # Very generic fallback
-                "div[class*='table'] > div[class*='row']",
-                "ul > li[class*='item']"
+                "ul > li",  # Any list items
+                "div[class*='list'] > div[class*='item']"
             ]
 
             company_elements = []
@@ -174,8 +182,20 @@ class LeadfeederScraper:
             if not company_elements:
                 # Debug: Log page source to understand structure
                 logger.warning("No company elements found with any selector")
-                page_text = self.driver.find_element(By.TAG_NAME, "body").text[:500]
-                logger.debug(f"Page content preview: {page_text}")
+                try:
+                    page_text = self.driver.find_element(By.TAG_NAME, "body").text[:500]
+                    logger.warning(f"Page content preview: {page_text}")
+
+                    # Try to find any clickable elements to understand structure
+                    all_buttons = self.driver.find_elements(By.CSS_SELECTOR, "[role='button']")
+                    logger.warning(f"Found {len(all_buttons)} clickable elements on page")
+
+                    # Log some element classes for debugging
+                    if all_buttons:
+                        for i, btn in enumerate(all_buttons[:5]):
+                            classes = btn.get_attribute("class")
+                            text = btn.text[:50] if btn.text else "(no text)"
+                            logger.warning(f"Button {i}: class='{classes}' text='{text}'")
 
             logger.info(f"Found {len(company_elements)} company elements total")
 
