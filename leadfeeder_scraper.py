@@ -114,7 +114,8 @@ class LeadfeederScraper:
 
             # Check if login was successful
             current_url = self.driver.current_url
-            if "login" not in current_url.lower() and "error" not in current_url.lower():
+            # Dealfront uses /sign/in, Leadfeeder used /login
+            if "login" not in current_url.lower() and "sign" not in current_url.lower() and "error" not in current_url.lower():
                 logger.info(f"Leadfeeder/Dealfront login successful - redirected to: {current_url}")
 
                 # Extract feed ID from Dealfront URL (e.g., https://app.dealfront.com/f/296346/...)
@@ -134,7 +135,16 @@ class LeadfeederScraper:
 
                 return True
             else:
-                logger.error("Leadfeeder login failed - still on login page")
+                logger.error(f"Leadfeeder/Dealfront login failed - still on login/sign-in page: {current_url}")
+                # Check for error messages on page
+                try:
+                    error_messages = self.driver.find_elements(By.CSS_SELECTOR, "[role='alert'], .error, .alert-error")
+                    if error_messages:
+                        for msg in error_messages:
+                            if msg.text:
+                                logger.error(f"Login error message: {msg.text}")
+                except Exception:
+                    pass
                 return False
 
         except TimeoutException:
