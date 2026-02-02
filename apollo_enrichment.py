@@ -12,19 +12,25 @@ class ApolloEnricher:
 
     def __init__(self, api_key: str = None):
         self.api_key = api_key or Config.APOLLO_API_KEY
-        self.base_url = "https://api.apollo.io/v1"
+        self.base_url = "https://api.apollo.io/api/v1"  # Fixed: added /api prefix
         self.session = requests.Session()
         self.session.headers.update({
             "Content-Type": "application/json",
             "Cache-Control": "no-cache"
         })
 
+        if not self.api_key:
+            logger.warning("Apollo API key not configured. Enrichment features will be unavailable.")
+
     def enrich_person(self, email: str = None, first_name: str = None,
                      last_name: str = None, company: str = None,
                      domain: str = None, linkedin_url: str = None,
                      person_id: str = None,
                      reveal_personal_emails: bool = False,
-                     reveal_phone_number: bool = False) -> Optional[Dict]:
+                     reveal_phone_number: bool = False,
+                     webhook_url: str = None,
+                     run_waterfall_email: bool = False,
+                     run_waterfall_phone: bool = False) -> Optional[Dict]:
         """
         Enrich a person record with Apollo data
 
@@ -38,6 +44,9 @@ class ApolloEnricher:
             person_id: Apollo person ID (optional)
             reveal_personal_emails: Whether to reveal personal emails (credits)
             reveal_phone_number: Whether to reveal phone numbers (credits)
+            webhook_url: URL to receive phone number webhook (required if reveal_phone_number=True)
+            run_waterfall_email: Enable email waterfall enrichment
+            run_waterfall_phone: Enable phone waterfall enrichment
 
         Returns:
             {
@@ -81,6 +90,14 @@ class ApolloEnricher:
             payload["reveal_personal_emails"] = True
         if reveal_phone_number:
             payload["reveal_phone_number"] = True
+            if webhook_url:
+                payload["webhook_url"] = webhook_url
+            else:
+                logger.warning("reveal_phone_number=True requires webhook_url to receive results")
+        if run_waterfall_email:
+            payload["run_waterfall_email"] = True
+        if run_waterfall_phone:
+            payload["run_waterfall_phone"] = True
 
         try:
             response = self.session.post(endpoint, json=payload)
@@ -90,38 +107,63 @@ class ApolloEnricher:
             if data.get("person"):
                 person = data["person"]
                 org = person.get("organization") or {}
+
+                # Handle waterfall status if present
+                waterfall_info = data.get("waterfall", {})
+                if waterfall_info:
+                    logger.info(f"Waterfall enrichment: {waterfall_info.get('status')} - {waterfall_info.get('message')}")
+
                 return {
                     "name": person.get("name", ""),
+                    "first_name": person.get("first_name", ""),
+                    "last_name": person.get("last_name", ""),
                     "title": person.get("title", ""),
                     "seniority": person.get("seniority", ""),
                     "departments": person.get("departments", []),
                     "email_status": person.get("email_status", ""),
                     "email": person.get("email", ""),
+                    "personal_emails": person.get("personal_emails", []),
                     "phone": person.get("phone_numbers", [{}])[0].get("raw_number", "") if person.get("phone_numbers") else "",
+                    "phone_numbers": person.get("phone_numbers", []),
                     "linkedin_url": person.get("linkedin_url", ""),
                     "person_id": person.get("id", ""),
                     "job_start_date": person.get("job_start_date", ""),
+                    "employment_history": person.get("employment_history", []),
                     "company": {
                         "id": org.get("id", ""),
                         "name": org.get("name", ""),
                         "domain": org.get("primary_domain", ""),
                         "industry": org.get("industry", ""),
                         "employee_count": org.get("estimated_num_employees", 0)
-                    }
+                    },
+                    "waterfall_status": waterfall_info
                 }
             else:
-                logger.warning(f"No person match found for {email}")
+                logger.warning(f"No person match found for {email or first_name} {last_name}")
                 return None
 
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                logger.error("Apollo API authentication failed. Check your API key.")
+            elif e.response.status_code == 429:
+                logger.error("Apollo API rate limit exceeded. Please slow down requests.")
+            elif e.response.status_code == 402:
+                logger.error("Apollo API credits exhausted. Please purchase more credits.")
+            else:
+                logger.error(f"Apollo API HTTP error for {email}: {e.response.status_code} - {e.response.text}")
+            return None
         except requests.exceptions.RequestException as e:
-            logger.error(f"Apollo API error for {email}: {e}")
+            logger.error(f"Apollo API request error for {email}: {e}")
             return None
         finally:
             time.sleep(Config.APOLLO_RATE_LIMIT_DELAY)
 
     def bulk_enrich_people(self, people: List[Dict],
                            reveal_personal_emails: bool = False,
-                           reveal_phone_number: bool = False) -> List[Dict]:
+                           reveal_phone_number: bool = False,
+                           webhook_url: str = None,
+                           run_waterfall_email: bool = False,
+                           run_waterfall_phone: bool = False) -> List[Dict]:
         """
         Bulk enrich people (up to 10 per call).
 
@@ -157,6 +199,13 @@ class ApolloEnricher:
                 for item in people
             ]
         }
+
+        if webhook_url:
+            payload["webhook_url"] = webhook_url
+        if run_waterfall_email:
+            payload["run_waterfall_email"] = True
+        if run_waterfall_phone:
+            payload["run_waterfall_phone"] = True
 
         try:
             response = self.session.post(endpoint, json=payload)
@@ -253,6 +302,47 @@ class ApolloEnricher:
         finally:
             time.sleep(Config.APOLLO_RATE_LIMIT_DELAY)
 
+    def get_account_info(self) -> Optional[Dict]:
+        """
+        Get Apollo account information including credits remaining.
+
+        Returns:
+            {
+                'email': str,
+                'team_id': str,
+                'credits': {
+                    'email_credits': int,
+                    'export_credits': int,
+                    'mobile_credits': int
+                },
+                'account_status': str
+            }
+        """
+        endpoint = f"{self.base_url}/auth/health"
+        payload = {"api_key": self.api_key}
+
+        try:
+            response = self.session.get(endpoint, params=payload)
+            response.raise_for_status()
+            data = response.json()
+
+            return {
+                "email": data.get("email", ""),
+                "team_id": data.get("team_id", ""),
+                "credits": {
+                    "email_credits": data.get("email_credits_remaining", 0),
+                    "export_credits": data.get("export_credits_remaining", 0),
+                    "mobile_credits": data.get("mobile_credits_remaining", 0)
+                },
+                "is_active": data.get("is_active", False),
+                "account_status": "active" if data.get("is_active") else "inactive"
+            }
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Apollo account info API error: {e}")
+            return None
+        finally:
+            time.sleep(Config.APOLLO_RATE_LIMIT_DELAY)
+
     def get_company_job_postings(self, company_id: str) -> List[Dict]:
         """
         Get current job postings for a company (intent signal)
@@ -287,6 +377,21 @@ class ApolloEnricher:
             return []
         finally:
             time.sleep(Config.APOLLO_RATE_LIMIT_DELAY)
+
+
+def get_webhook_url(base_url: str = None) -> str:
+    """
+    Generate the webhook URL for Apollo phone reveals.
+
+    Args:
+        base_url: Your application's base URL (e.g., https://your-app.railway.app)
+
+    Returns:
+        Full webhook URL for Apollo
+    """
+    from config import Config
+    base = base_url or Config.BASE_URL
+    return f"{base}/api/webhooks/apollo/phone-reveal"
 
 
 def detect_wms_system(technologies: List[str]) -> str:

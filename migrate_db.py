@@ -4,7 +4,7 @@ Database migration script to upgrade schema to v3.
 Adds support for sequence templates, multi-channel sequences, signatures, and enhanced tracking.
 """
 
-from lead_registry import init_db, upgrade_schema_v2, upgrade_schema_v3, upgrade_schema_v4, upgrade_schema_v5, upgrade_schema_v6, upgrade_schema_v7
+from lead_registry import init_db, upgrade_schema_v2, upgrade_schema_v3, upgrade_schema_v4, upgrade_schema_v5, upgrade_schema_v6, upgrade_schema_v7, upgrade_schema_v8
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +41,10 @@ def main():
     # Upgrade to v7
     logger.info("Upgrading to schema v7...")
     upgrade_schema_v7()
+
+    # Upgrade to v8
+    logger.info("Upgrading to schema v8...")
+    upgrade_schema_v8()
 
     logger.info("✓ Database migration completed successfully!")
     logger.info("")

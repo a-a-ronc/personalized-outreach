@@ -1158,3 +1158,35 @@ def upgrade_schema_v7():
             pass  # Column already exists
 
         logger.info("✓ Schema upgraded to v7: email warmup tracking tables")
+
+
+def upgrade_schema_v8():
+    """Upgrade database schema to v8 with Apollo webhook queue table."""
+    with get_connection() as conn:
+        # Apollo webhook queue for phone reveals and other async enrichments
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS apollo_webhook_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                webhook_type TEXT NOT NULL,
+                person_id TEXT,
+                company_id TEXT,
+                payload TEXT NOT NULL,
+                received_at TEXT NOT NULL,
+                processed INTEGER DEFAULT 0,
+                processed_at TEXT,
+                error_message TEXT,
+                FOREIGN KEY (person_id) REFERENCES leads_people(apollo_id)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_apollo_webhook_person ON apollo_webhook_queue(person_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_apollo_webhook_processed ON apollo_webhook_queue(processed)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_apollo_webhook_type ON apollo_webhook_queue(webhook_type)")
+
+        # Add phone_numbers column to leads_people if it doesn't exist (for multiple phones)
+        try:
+            conn.execute("ALTER TABLE leads_people ADD COLUMN phone_numbers TEXT")
+            logger.info("Added phone_numbers column to leads_people")
+        except Exception:
+            pass  # Column already exists
+
+        logger.info("✓ Schema upgraded to v8: Apollo webhook queue table")

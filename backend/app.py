@@ -31,6 +31,12 @@ from config import Config  # noqa: E402
 from main import generate_campaigns  # noqa: E402
 from lead_registry import (  # noqa: E402
     init_db,
+    upgrade_schema_v2,
+    upgrade_schema_v3,
+    upgrade_schema_v4,
+    upgrade_schema_v5,
+    upgrade_schema_v6,
+    upgrade_schema_v7,
     upsert_company,
     upsert_person,
     get_person_by_key,
@@ -55,6 +61,18 @@ from lead_scoring import (  # noqa: E402
     assign_strategy,
     normalize_text as normalize_scoring_text
 )
+from auth import (  # noqa: E402
+    init_auth_tables,
+    create_default_admin,
+    create_user,
+    authenticate_user,
+    require_auth,
+    require_admin,
+    get_all_users,
+    update_user,
+    change_password,
+    get_current_user_from_token
+)
 
 # Configure Flask to serve React frontend
 DASHBOARD_DIST = BASE_DIR / "dashboard" / "dist"
@@ -63,7 +81,18 @@ app = Flask(__name__,
             static_url_path='')
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
+# Initialize database and run all migrations
 init_db()
+upgrade_schema_v2()
+upgrade_schema_v3()
+upgrade_schema_v4()
+upgrade_schema_v5()
+upgrade_schema_v6()
+upgrade_schema_v7()
+
+# Initialize authentication
+init_auth_tables()
+create_default_admin()
 
 ALLOWED_EXTENSIONS = {".csv"}
 REPLY_CLASSES = [
@@ -738,7 +767,116 @@ def health():
     return jsonify({"status": "ok"})
 
 
+# ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+@app.route("/api/auth/register", methods=["POST"])
+def register():
+    """Register a new user (public endpoint)."""
+    data = request.json
+
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    result = create_user(
+        username=data.get("username"),
+        email=data.get("email"),
+        password=data.get("password"),
+        full_name=data.get("full_name")
+    )
+
+    if result["success"]:
+        return jsonify(result), 201
+    else:
+        return jsonify(result), 400
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def login():
+    """Login with username/email and password."""
+    data = request.json
+
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    result = authenticate_user(
+        username_or_email=data.get("username"),
+        password=data.get("password")
+    )
+
+    if result["success"]:
+        return jsonify(result), 200
+    else:
+        return jsonify(result), 401
+
+
+@app.route("/api/auth/me", methods=["GET"])
+@require_auth
+def get_current_user():
+    """Get current user info from token."""
+    return jsonify(request.current_user)
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@require_auth
+def logout():
+    """Logout (client-side token removal)."""
+    return jsonify({"success": True, "message": "Logged out"})
+
+
+@app.route("/api/auth/change-password", methods=["POST"])
+@require_auth
+def change_user_password():
+    """Change current user's password."""
+    data = request.json
+
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    result = change_password(
+        user_id=request.current_user["id"],
+        old_password=data.get("old_password"),
+        new_password=data.get("new_password")
+    )
+
+    if result["success"]:
+        return jsonify(result), 200
+    else:
+        return jsonify(result), 400
+
+
+@app.route("/api/users", methods=["GET"])
+@require_admin
+def list_users():
+    """List all users (admin only)."""
+    users = get_all_users()
+    return jsonify({"users": users})
+
+
+@app.route("/api/users/<int:user_id>", methods=["PUT"])
+@require_admin
+def update_user_endpoint(user_id):
+    """Update user (admin only)."""
+    data = request.json
+
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    result = update_user(user_id, **data)
+
+    if result["success"]:
+        return jsonify(result), 200
+    else:
+        return jsonify(result), 400
+
+
+# ============================================================================
+# CAMPAIGN ENDPOINTS (Protected)
+# ============================================================================
+
 @app.route("/api/campaigns", methods=["GET", "POST"])
+@require_auth
 def campaigns():
     ensure_seed_data()
     data = load_json()
@@ -3763,6 +3901,111 @@ def run_job_manually(job_id):
 
     result = run_job_now(job_id)
     return jsonify(result)
+
+
+@app.route("/api/apollo/account", methods=["GET"])
+def apollo_account_info():
+    """Get Apollo API account information and credits."""
+    try:
+        from apollo_enrichment import ApolloEnricher
+        enricher = ApolloEnricher()
+
+        if not enricher.api_key:
+            return jsonify({
+                "configured": False,
+                "error": "Apollo API key not configured"
+            }), 200
+
+        account_info = enricher.get_account_info()
+
+        if account_info:
+            return jsonify({
+                "configured": True,
+                **account_info
+            })
+        else:
+            return jsonify({
+                "configured": True,
+                "error": "Failed to fetch account info"
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error fetching Apollo account info: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/webhooks/apollo/phone-reveal", methods=["POST"])
+def apollo_phone_reveal_webhook():
+    """
+    Receive phone number reveals from Apollo waterfall enrichment.
+
+    Apollo sends POST requests to this endpoint when phone numbers are revealed
+    via waterfall enrichment. The payload contains the person data with phone numbers.
+    """
+    payload = get_request_json()
+
+    try:
+        # Log the webhook receipt
+        logger.info(f"Received Apollo phone reveal webhook for person_id: {payload.get('person', {}).get('id')}")
+
+        person = payload.get("person", {})
+        person_id = person.get("id")
+
+        if not person_id:
+            return jsonify({"error": "Missing person_id in webhook payload"}), 400
+
+        # Extract phone numbers
+        phone_numbers = person.get("phone_numbers", [])
+
+        if not phone_numbers:
+            logger.warning(f"No phone numbers in webhook for person_id: {person_id}")
+            return jsonify({"status": "no_phones"}), 200
+
+        # Update the person record in the database
+        with get_connection() as conn:
+            # Check if person exists
+            existing = conn.execute(
+                "SELECT * FROM leads_people WHERE apollo_id = ?",
+                (person_id,)
+            ).fetchone()
+
+            if existing:
+                # Update phone number
+                primary_phone = phone_numbers[0].get("raw_number", "")
+                conn.execute("""
+                    UPDATE leads_people
+                    SET phone = ?,
+                        phone_numbers = ?,
+                        updated_at = ?
+                    WHERE apollo_id = ?
+                """, (
+                    primary_phone,
+                    json.dumps(phone_numbers),
+                    utc_now(),
+                    person_id
+                ))
+
+                logger.info(f"Updated phone number for person_id: {person_id}")
+                return jsonify({"status": "updated", "person_id": person_id}), 200
+            else:
+                logger.warning(f"Person not found in database: {person_id}")
+                # Store the webhook data for later processing
+                conn.execute("""
+                    INSERT INTO apollo_webhook_queue (
+                        webhook_type, person_id, payload, received_at, processed
+                    ) VALUES (?, ?, ?, ?, ?)
+                """, (
+                    "phone_reveal",
+                    person_id,
+                    json.dumps(payload),
+                    utc_now(),
+                    0
+                ))
+                return jsonify({"status": "queued", "person_id": person_id}), 200
+
+    except Exception as e:
+        logger.error(f"Error processing Apollo phone webhook: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 # Serve React frontend (catch-all route - must be last)
