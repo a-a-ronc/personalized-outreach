@@ -147,20 +147,37 @@ class LeadfeederScraper:
             # Scroll to load more companies (lazy loading)
             self._scroll_and_load(max_companies)
 
-            # Find company rows
-            company_elements = self.driver.find_elements(
-                By.CSS_SELECTOR,
-                "[data-testid='company-row'], .company-row, .visitor-row, tr[class*='company'], tr[class*='visitor']"
-            )
+            # Try multiple selector strategies to handle Leadfeeder UI changes
+            selector_strategies = [
+                # Modern Leadfeeder selectors
+                "table tbody tr",  # Generic table rows
+                "[role='row']",  # ARIA table rows
+                ".MuiTableRow-root",  # Material UI table rows
+                # Original selectors
+                "[data-testid='company-row'], .company-row, .visitor-row",
+                "tr[class*='company'], tr[class*='visitor']",
+                # Alternative selectors
+                ".leads-list-item, .lead-item",
+                "[class*='LeadRow'], [class*='CompanyRow']",
+                # Very generic fallback
+                "div[class*='table'] > div[class*='row']",
+                "ul > li[class*='item']"
+            ]
+
+            company_elements = []
+            for selector in selector_strategies:
+                company_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if company_elements:
+                    logger.info(f"Found {len(company_elements)} elements using selector: {selector}")
+                    break
 
             if not company_elements:
-                # Try alternative selectors
-                company_elements = self.driver.find_elements(
-                    By.CSS_SELECTOR,
-                    ".leads-list-item, .lead-item, [class*='LeadRow'], [class*='CompanyRow']"
-                )
+                # Debug: Log page source to understand structure
+                logger.warning("No company elements found with any selector")
+                page_text = self.driver.find_element(By.TAG_NAME, "body").text[:500]
+                logger.debug(f"Page content preview: {page_text}")
 
-            logger.info(f"Found {len(company_elements)} company elements")
+            logger.info(f"Found {len(company_elements)} company elements total")
 
             for idx, element in enumerate(company_elements[:max_companies]):
                 try:
