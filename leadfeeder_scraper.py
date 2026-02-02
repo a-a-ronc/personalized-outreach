@@ -196,6 +196,8 @@ class LeadfeederScraper:
                             classes = btn.get_attribute("class")
                             text = btn.text[:50] if btn.text else "(no text)"
                             logger.warning(f"Button {i}: class='{classes}' text='{text}'")
+                except Exception as debug_error:
+                    logger.warning(f"Failed to retrieve debug info: {debug_error}")
 
             logger.info(f"Found {len(company_elements)} company elements total")
 
