@@ -9,7 +9,9 @@ import SendersManagement from "./components/SendersManagement";
 import VisitorTable from "./components/VisitorTable";
 import VisitorAnalytics from "./components/VisitorAnalytics";
 
-const API_BASE_DEFAULT = import.meta.env.VITE_API_URL || "http://127.0.0.1:7000";
+// Auto-detect production environment (Railway, Vercel, etc.)
+const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+const API_BASE_DEFAULT = import.meta.env.VITE_API_URL || (isProduction ? '' : "http://127.0.0.1:7000");
 
 // Apollo-style 4-section navigation
 const SECTIONS = [
@@ -258,6 +260,18 @@ function App() {
     (path, options) => fetchJson(normalizedApiBase, path, options),
     [normalizedApiBase]
   );
+
+  // Clear bad localStorage on production
+  useEffect(() => {
+    if (isProduction) {
+      const storedApiBase = window.localStorage.getItem("apiBase");
+      if (storedApiBase && (storedApiBase.includes('localhost') || storedApiBase.includes('127.0.0.1'))) {
+        console.log('Clearing localhost API base in production');
+        window.localStorage.removeItem("apiBase");
+        setApiBase('');
+      }
+    }
+  }, []);
 
   useEffect(() => {
     fetchApi("/api/campaigns")
