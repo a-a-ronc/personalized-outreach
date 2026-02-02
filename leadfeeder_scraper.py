@@ -34,6 +34,7 @@ class LeadfeederScraper:
         self.email = email or Config.LEADFEEDER_EMAIL
         self.password = password or Config.LEADFEEDER_PASSWORD
         self.driver = None
+        self.feed_id = None  # Will be set after login
 
     def init_driver(self, headless: bool = True):
         """Initialize Chrome driver with anti-detection measures."""
@@ -113,7 +114,23 @@ class LeadfeederScraper:
             # Check if login was successful
             current_url = self.driver.current_url
             if "login" not in current_url.lower() and "error" not in current_url.lower():
-                logger.info("Leadfeeder login successful")
+                logger.info(f"Leadfeeder login successful - redirected to: {current_url}")
+
+                # Extract feed ID from URL (e.g., https://app.leadfeeder.com/app/feeds/12345/...)
+                feed_id_match = re.search(r'/feeds/([^/]+)', current_url)
+                if feed_id_match:
+                    self.feed_id = feed_id_match.group(1)
+                    logger.info(f"Detected feed ID: {self.feed_id}")
+                else:
+                    # Try alternative URL patterns
+                    app_id_match = re.search(r'/app/([^/]+)', current_url)
+                    if app_id_match:
+                        self.feed_id = app_id_match.group(1)
+                        logger.info(f"Detected app ID: {self.feed_id}")
+                    else:
+                        logger.warning("Could not detect feed ID from URL, using base dashboard URL")
+                        self.feed_id = None
+
                 return True
             else:
                 logger.error("Leadfeeder login failed - still on login page")
@@ -141,7 +158,25 @@ class LeadfeederScraper:
         try:
             # Navigate to visitors/companies page
             logger.info("Navigating to Leadfeeder visitors page...")
-            self.driver.get(f"{self.LEADFEEDER_DASHBOARD_URL}/visitors")
+
+            # Construct visitors URL with feed ID if available
+            if hasattr(self, 'feed_id') and self.feed_id:
+                visitors_url = f"{self.LEADFEEDER_DASHBOARD_URL}/app/feeds/{self.feed_id}/visitors"
+            else:
+                # Fallback: try to detect current URL structure
+                current_url = self.driver.current_url
+                if '/feeds/' in current_url:
+                    # Replace whatever page we're on with /visitors
+                    visitors_url = re.sub(r'/feeds/[^/]+/[^/?]*', lambda m: m.group(0).rsplit('/', 1)[0] + '/visitors', current_url)
+                elif '/app/' in current_url:
+                    # Alternative structure: /app/{id}/...
+                    visitors_url = re.sub(r'/app/[^/]+/[^/?]*', lambda m: m.group(0).rsplit('/', 1)[0] + '/visitors', current_url)
+                else:
+                    # Last resort: use base URL
+                    visitors_url = f"{self.LEADFEEDER_DASHBOARD_URL}/visitors"
+
+            logger.info(f"Navigating to: {visitors_url}")
+            self.driver.get(visitors_url)
             self._human_delay(3, 5)
 
             # Scroll to load more companies (lazy loading)
