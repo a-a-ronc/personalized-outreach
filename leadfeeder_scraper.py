@@ -37,6 +37,9 @@ class LeadfeederScraper:
 
     def init_driver(self, headless: bool = True):
         """Initialize Chrome driver with anti-detection measures."""
+        import os
+        import shutil
+
         chrome_options = Options()
         if headless:
             chrome_options.add_argument("--headless")
@@ -44,12 +47,19 @@ class LeadfeederScraper:
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--disable-gpu")  # Required for headless mode
         chrome_options.add_argument(
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
+
+        # Check if running on Railway/Nixpacks with chromium
+        chromium_path = shutil.which("chromium") or shutil.which("chromium-browser")
+        if chromium_path:
+            chrome_options.binary_location = chromium_path
+            logger.info(f"Using Chromium at: {chromium_path}")
 
         self.driver = webdriver.Chrome(options=chrome_options)
         self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {

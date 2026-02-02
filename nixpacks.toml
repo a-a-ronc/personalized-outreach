@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["python312", "nodejs_20"]
+nixPkgs = ["python312", "nodejs_20", "chromium", "chromedriver"]
 
 [phases.build]
 cmds = ["cd dashboard && npm install && npm run build"]
