@@ -27,8 +27,9 @@ logger = logging.getLogger(__name__)
 class LeadfeederScraper:
     """Scrapes visitor data from Leadfeeder dashboard."""
 
-    LEADFEEDER_LOGIN_URL = "https://app.leadfeeder.com/login"
-    LEADFEEDER_DASHBOARD_URL = "https://app.leadfeeder.com"
+    # Leadfeeder is now Dealfront (acquired/merged)
+    LEADFEEDER_LOGIN_URL = "https://app.dealfront.com/login"
+    LEADFEEDER_DASHBOARD_URL = "https://app.dealfront.com"
 
     def __init__(self, email: str = None, password: str = None):
         self.email = email or Config.LEADFEEDER_EMAIL
@@ -114,19 +115,19 @@ class LeadfeederScraper:
             # Check if login was successful
             current_url = self.driver.current_url
             if "login" not in current_url.lower() and "error" not in current_url.lower():
-                logger.info(f"Leadfeeder login successful - redirected to: {current_url}")
+                logger.info(f"Leadfeeder/Dealfront login successful - redirected to: {current_url}")
 
-                # Extract feed ID from URL (e.g., https://app.leadfeeder.com/app/feeds/12345/...)
-                feed_id_match = re.search(r'/feeds/([^/]+)', current_url)
+                # Extract feed ID from Dealfront URL (e.g., https://app.dealfront.com/f/296346/...)
+                feed_id_match = re.search(r'/f/(\d+)', current_url)
                 if feed_id_match:
                     self.feed_id = feed_id_match.group(1)
                     logger.info(f"Detected feed ID: {self.feed_id}")
                 else:
-                    # Try alternative URL patterns
-                    app_id_match = re.search(r'/app/([^/]+)', current_url)
-                    if app_id_match:
-                        self.feed_id = app_id_match.group(1)
-                        logger.info(f"Detected app ID: {self.feed_id}")
+                    # Try old Leadfeeder URL pattern for backwards compatibility
+                    old_feed_match = re.search(r'/feeds/([^/]+)', current_url)
+                    if old_feed_match:
+                        self.feed_id = old_feed_match.group(1)
+                        logger.info(f"Detected feed ID (old format): {self.feed_id}")
                     else:
                         logger.warning("Could not detect feed ID from URL, using base dashboard URL")
                         self.feed_id = None
@@ -157,23 +158,24 @@ class LeadfeederScraper:
 
         try:
             # Navigate to visitors/companies page
-            logger.info("Navigating to Leadfeeder visitors page...")
+            logger.info("Navigating to Dealfront/Leadfeeder visitors page...")
 
             # Construct visitors URL with feed ID if available
             if hasattr(self, 'feed_id') and self.feed_id:
-                visitors_url = f"{self.LEADFEEDER_DASHBOARD_URL}/app/feeds/{self.feed_id}/visitors"
+                # New Dealfront URL structure
+                visitors_url = f"{self.LEADFEEDER_DASHBOARD_URL}/f/{self.feed_id}/feed/all-companies"
             else:
                 # Fallback: try to detect current URL structure
                 current_url = self.driver.current_url
-                if '/feeds/' in current_url:
-                    # Replace whatever page we're on with /visitors
+                if '/f/' in current_url:
+                    # Dealfront URL: replace page with /feed/all-companies
+                    visitors_url = re.sub(r'/f/\d+/[^?]*', lambda m: f"/f/{m.group(0).split('/')[2]}/feed/all-companies", current_url)
+                elif '/feeds/' in current_url:
+                    # Old Leadfeeder URL
                     visitors_url = re.sub(r'/feeds/[^/]+/[^/?]*', lambda m: m.group(0).rsplit('/', 1)[0] + '/visitors', current_url)
-                elif '/app/' in current_url:
-                    # Alternative structure: /app/{id}/...
-                    visitors_url = re.sub(r'/app/[^/]+/[^/?]*', lambda m: m.group(0).rsplit('/', 1)[0] + '/visitors', current_url)
                 else:
-                    # Last resort: use base URL
-                    visitors_url = f"{self.LEADFEEDER_DASHBOARD_URL}/visitors"
+                    # Last resort: use base URL (likely won't work without feed ID)
+                    visitors_url = f"{self.LEADFEEDER_DASHBOARD_URL}/feed/all-companies"
 
             logger.info(f"Navigating to: {visitors_url}")
             self.driver.get(visitors_url)
