@@ -42,6 +42,16 @@ class LeadfeederScraper:
         import os
         import shutil
 
+        # Try to start VNC for remote viewing (will run in non-headless mode if VNC is available)
+        try:
+            from vnc_manager import ensure_vnc_running
+            vnc_display = ensure_vnc_running()
+            if vnc_display:
+                logger.info(f"VNC enabled - browser will be viewable remotely on display {vnc_display}")
+                headless = False  # Don't use headless mode when VNC is active
+        except Exception as e:
+            logger.debug(f"VNC not available: {e}")
+
         chrome_options = Options()
         if headless:
             chrome_options.add_argument("--headless")
@@ -49,7 +59,8 @@ class LeadfeederScraper:
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--disable-gpu")  # Required for headless mode
+        if headless:
+            chrome_options.add_argument("--disable-gpu")  # Only for headless mode
         chrome_options.add_argument(
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

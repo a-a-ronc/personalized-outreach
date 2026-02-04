@@ -11,6 +11,8 @@ webdriver-manager>=4.0.0
 # Website Visitor Identification
 geoip2>=4.8.0
 apscheduler>=3.10.0
+# VNC web viewing
+websockify>=0.11.0
 # Production WSGI server
 gunicorn>=21.2.0
 # MCP Server for Claude Desktop integration
