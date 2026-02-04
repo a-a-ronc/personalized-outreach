@@ -74,24 +74,32 @@ class LeadfeederScraper:
         """Add random delay to mimic human behavior."""
         time.sleep(random.uniform(min_seconds, max_seconds))
 
+    def _take_screenshot(self, name: str):
+        """Take a screenshot for debugging."""
+        try:
+            import os
+            screenshot_dir = "/tmp/leadfeeder_screenshots" if os.path.exists("/tmp") else "screenshots"
+            os.makedirs(screenshot_dir, exist_ok=True)
+            filepath = f"{screenshot_dir}/{name}_{datetime.now().strftime('%H%M%S')}.png"
+            self.driver.save_screenshot(filepath)
+            logger.info(f"Screenshot saved: {filepath}")
+            return filepath
+        except Exception as e:
+            logger.warning(f"Failed to save screenshot: {e}")
+
     def _type_slowly(self, element, text: str):
         """Type text character by character with human-like delays."""
         # Click to focus the field first
         element.click()
-        time.sleep(random.uniform(0.3, 0.6))
+        time.sleep(random.uniform(0.5, 0.8))
 
-        # Clear any existing value
-        element.clear()
-        time.sleep(random.uniform(0.2, 0.4))
+        # DON'T call clear() - React forms reset when cleared
+        # Just send keys directly - the field should be empty on first focus
 
-        # Type character by character with varied delays
-        for i, char in enumerate(text):
-            element.send_keys(char)
-            # Vary typing speed - faster in middle, slower at start/end
-            if i < 3 or i > len(text) - 3:
-                time.sleep(random.uniform(0.15, 0.25))  # Slower at edges
-            else:
-                time.sleep(random.uniform(0.08, 0.15))  # Faster in middle
+        # Type the full text with small delays
+        # Using send_keys with full text instead of char-by-char to avoid React issues
+        element.send_keys(text)
+        time.sleep(random.uniform(0.3, 0.5))
 
     def login(self) -> bool:
         """Login to Leadfeeder."""
@@ -103,6 +111,9 @@ class LeadfeederScraper:
             logger.info("Navigating to Dealfront/Leadfeeder login page...")
             self.driver.get(self.LEADFEEDER_LOGIN_URL)
             self._human_delay(3, 5)  # Give page time to fully load
+
+            # Take screenshot of login page
+            self._take_screenshot("01_login_page")
 
             # Wait for login form
             logger.info("Waiting for email field...")
@@ -136,6 +147,9 @@ class LeadfeederScraper:
             email_value = email_field.get_attribute("value")
             logger.info(f"Email field value after typing: '{email_value[:3]}...{email_value[-10:] if len(email_value) > 10 else email_value}' (length: {len(email_value)})")
 
+            # Screenshot after email
+            self._take_screenshot("02_after_email")
+
             self._human_delay(0.8, 1.5)  # Pause after email like a human
 
             logger.info("Entering password...")
@@ -144,6 +158,9 @@ class LeadfeederScraper:
             # Verify password was entered
             pwd_value = password_field.get_attribute("value")
             logger.info(f"Password field has {len(pwd_value)} characters")
+
+            # Screenshot after password
+            self._take_screenshot("03_after_password")
 
             self._human_delay(1, 2)  # Pause before clicking login
             logger.info("Credentials entered")
