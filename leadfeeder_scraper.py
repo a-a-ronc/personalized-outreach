@@ -92,22 +92,33 @@ class LeadfeederScraper:
             self._human_delay(2, 4)
 
             # Wait for login form
+            logger.info("Waiting for email field...")
             email_field = WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
             )
+            logger.info("Email field found")
 
             # Find password field
+            logger.info("Looking for password field...")
             password_field = self.driver.find_element(By.CSS_SELECTOR, "input[type='password'], input[name='password']")
+            logger.info("Password field found")
 
             # Enter credentials slowly
+            logger.info(f"Entering email: {self.email[:3]}...{self.email[-10:]}")
             self._type_slowly(email_field, self.email)
             self._human_delay(0.5, 1)
+            logger.info("Entering password...")
             self._type_slowly(password_field, self.password)
             self._human_delay(0.5, 1)
+            logger.info("Credentials entered")
 
             # Find and click login button
+            logger.info("Looking for login button...")
             login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+            button_text = login_button.text
+            logger.info(f"Login button found: '{button_text}'")
             login_button.click()
+            logger.info("Login button clicked, waiting for redirect...")
 
             # Wait for dashboard to load
             self._human_delay(5, 8)
@@ -138,13 +149,24 @@ class LeadfeederScraper:
                 logger.error(f"Leadfeeder/Dealfront login failed - still on login/sign-in page: {current_url}")
                 # Check for error messages on page
                 try:
-                    error_messages = self.driver.find_elements(By.CSS_SELECTOR, "[role='alert'], .error, .alert-error")
+                    # Check for various error message patterns
+                    error_messages = self.driver.find_elements(By.CSS_SELECTOR, "[role='alert'], .error, .alert-error, .alert-danger, [class*='error'], [class*='alert']")
                     if error_messages:
-                        for msg in error_messages:
-                            if msg.text:
-                                logger.error(f"Login error message: {msg.text}")
-                except Exception:
-                    pass
+                        logger.info(f"Found {len(error_messages)} potential error elements")
+                        for i, msg in enumerate(error_messages):
+                            text = msg.text.strip() if msg.text else ""
+                            if text:
+                                logger.error(f"Error message {i+1}: {text}")
+                    else:
+                        logger.warning("No error messages found on page")
+
+                    # Log page title and a snippet of body text
+                    page_title = self.driver.title
+                    body_text = self.driver.find_element(By.TAG_NAME, "body").text[:500]
+                    logger.info(f"Page title: {page_title}")
+                    logger.info(f"Page content preview: {body_text}")
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve page info: {e}")
                 return False
 
         except TimeoutException:
