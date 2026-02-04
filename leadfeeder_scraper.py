@@ -122,12 +122,43 @@ class LeadfeederScraper:
             password_field = self.driver.find_element(By.CSS_SELECTOR, "input[type='password'], input[name='password']")
             logger.info("Password field found")
 
-            # Enter credentials slowly
+            # Enter credentials using JavaScript for better compatibility with React forms
             logger.info(f"Entering email: {self.email[:3]}...{self.email[-10:]}")
-            self._type_slowly(email_field, self.email)
+            try:
+                # Set value via JavaScript and trigger all necessary events
+                self.driver.execute_script("""
+                    var emailField = arguments[0];
+                    var emailValue = arguments[1];
+                    emailField.focus();
+                    emailField.value = emailValue;
+                    emailField.dispatchEvent(new Event('input', { bubbles: true }));
+                    emailField.dispatchEvent(new Event('change', { bubbles: true }));
+                    emailField.dispatchEvent(new Event('blur', { bubbles: true }));
+                """, email_field, self.email)
+                logger.info("Email set via JavaScript")
+            except Exception as e:
+                logger.warning(f"Failed to set email via JS, using typing: {e}")
+                self._type_slowly(email_field, self.email)
+
             self._human_delay(0.5, 1)
+
             logger.info("Entering password...")
-            self._type_slowly(password_field, self.password)
+            try:
+                # Set password via JavaScript
+                self.driver.execute_script("""
+                    var pwdField = arguments[0];
+                    var pwdValue = arguments[1];
+                    pwdField.focus();
+                    pwdField.value = pwdValue;
+                    pwdField.dispatchEvent(new Event('input', { bubbles: true }));
+                    pwdField.dispatchEvent(new Event('change', { bubbles: true }));
+                    pwdField.dispatchEvent(new Event('blur', { bubbles: true }));
+                """, password_field, self.password)
+                logger.info("Password set via JavaScript")
+            except Exception as e:
+                logger.warning(f"Failed to set password via JS, using typing: {e}")
+                self._type_slowly(password_field, self.password)
+
             self._human_delay(0.5, 1)
             logger.info("Credentials entered")
 
