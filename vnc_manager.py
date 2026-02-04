@@ -93,19 +93,25 @@ class VNCManager:
                         str(self.websocket_port),
                         f"localhost:{self.vnc_port}"
                     ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
                 )
 
                 time.sleep(1)
 
                 if self.websockify_process.poll() is not None:
-                    logger.warning("websockify failed to start, web viewing will not be available")
+                    # Process died, capture error output
+                    stdout, stderr = self.websockify_process.communicate(timeout=1)
+                    error_msg = stderr.decode('utf-8') if stderr else stdout.decode('utf-8') if stdout else "Unknown error"
+                    logger.error(f"websockify failed to start: {error_msg}")
                     self.websockify_process = None
                 else:
                     logger.info(f"websockify started successfully on port {self.websocket_port}")
-            except FileNotFoundError:
-                logger.warning("websockify not found, web viewing will not be available")
+            except FileNotFoundError as e:
+                logger.error(f"websockify not found: {e}")
+                self.websockify_process = None
+            except Exception as e:
+                logger.error(f"Failed to start websockify: {e}")
                 self.websockify_process = None
 
             self.running = True
