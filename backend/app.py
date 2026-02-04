@@ -81,6 +81,10 @@ app = Flask(__name__,
             static_url_path='')
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
+# Initialize WebSocket support for VNC viewing
+from flask_sock import Sock
+sock = Sock(app)
+
 # Initialize database and run all migrations
 init_db()
 upgrade_schema_v2()
@@ -3933,6 +3937,65 @@ def leadfeeder_vnc_status():
         return jsonify({"running": False, "error": str(e)})
 
 
+@sock.route('/vnc-websocket')
+def vnc_websocket(ws):
+    """WebSocket proxy to VNC server."""
+    import socket
+    import select
+
+    logger.info("VNC WebSocket connection initiated")
+
+    try:
+        # Connect to websockify server on localhost:6080
+        vnc_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        vnc_socket.connect(('localhost', 6080))
+        vnc_socket.setblocking(False)
+
+        logger.info("Connected to websockify server")
+
+        # Proxy data between WebSocket and VNC socket
+        while True:
+            # Check if either socket has data
+            readable, _, exceptional = select.select([vnc_socket], [], [vnc_socket], 0.1)
+
+            # Forward data from VNC to WebSocket
+            if vnc_socket in readable:
+                try:
+                    data = vnc_socket.recv(4096)
+                    if not data:
+                        break
+                    ws.send(data)
+                except Exception as e:
+                    logger.error(f"Error receiving from VNC: {e}")
+                    break
+
+            # Forward data from WebSocket to VNC
+            try:
+                data = ws.receive(timeout=0.1)
+                if data is None:
+                    continue
+                if isinstance(data, str):
+                    data = data.encode('utf-8')
+                vnc_socket.sendall(data)
+            except Exception as e:
+                if "timed out" not in str(e):
+                    logger.error(f"Error receiving from WebSocket: {e}")
+                    break
+
+            # Check for exceptions
+            if vnc_socket in exceptional:
+                break
+
+    except Exception as e:
+        logger.error(f"VNC WebSocket proxy error: {e}")
+    finally:
+        try:
+            vnc_socket.close()
+        except:
+            pass
+        logger.info("VNC WebSocket connection closed")
+
+
 @app.route("/vnc-viewer")
 def vnc_viewer():
     """Serve simple VNC viewer page."""
@@ -4055,12 +4118,12 @@ def vnc_viewer():
             connectBtn.disabled = true;
 
             try {
-                const host = window.location.hostname;
-                const port = window.location.port || '80';
-                const vncPort = '6080'; // WebSocket port
+                // Use same protocol as page (ws:// for http://, wss:// for https://)
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host; // includes port if present
 
-                // Construct WebSocket URL
-                const wsUrl = `ws://${host}:${vncPort}`;
+                // Connect through Flask proxy endpoint
+                const wsUrl = `${protocol}//${host}/vnc-websocket`;
 
                 rfb = new RFB(canvas, wsUrl, {
                     credentials: { password: '' }
