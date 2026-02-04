@@ -85,9 +85,10 @@ class VNCManager:
             # Start websockify for web-based VNC viewing
             logger.info(f"Starting websockify on port {self.websocket_port}")
             try:
+                import sys
                 self.websockify_process = subprocess.Popen(
                     [
-                        "websockify",
+                        sys.executable, "-m", "websockify",
                         "--web", "/dev/null",  # No web files needed, we'll serve our own
                         str(self.websocket_port),
                         f"localhost:{self.vnc_port}"
