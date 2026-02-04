@@ -4018,8 +4018,16 @@ def vnc_viewer():
 
     <div id="error" class="error" style="display:none;"></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/noVNC/1.4.0/core/rfb.min.js"></script>
-    <script>
+    <script type="module">
+        import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
+
+        // Make RFB available globally
+        window.RFB = RFB;
+
+        // Wait for DOM to be ready
+        document.addEventListener('DOMContentLoaded', initVNC);
+
+        function initVNC() {
         let rfb = null;
         const canvas = document.getElementById('screen');
         const status = document.getElementById('status');
@@ -4099,10 +4107,13 @@ def vnc_viewer():
             disconnectBtn.disabled = true;
         }
 
-        // Auto-connect on load
-        window.addEventListener('load', () => {
-            setTimeout(connect, 1000);
-        });
+        // Auto-connect after init
+        setTimeout(connect, 1000);
+
+        // Make functions globally available
+        window.connect = connect;
+        window.disconnect = disconnect;
+        }
     </script>
 </body>
 </html>
