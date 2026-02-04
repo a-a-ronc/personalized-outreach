@@ -3871,6 +3871,53 @@ def leadfeeder_manual_sync():
     return jsonify(result)
 
 
+@app.route("/api/integrations/leadfeeder/screenshots", methods=["GET"])
+def leadfeeder_screenshots():
+    """Get list of Leadfeeder scrape screenshots."""
+    import os
+    import glob
+
+    screenshot_dir = "/tmp/leadfeeder_screenshots"
+    if not os.path.exists(screenshot_dir):
+        return jsonify({"screenshots": []})
+
+    # Get all PNG files, sorted by modification time (newest first)
+    screenshots = glob.glob(f"{screenshot_dir}/*.png")
+    screenshots.sort(key=os.path.getmtime, reverse=True)
+
+    # Return only the 10 most recent screenshots with their metadata
+    results = []
+    for filepath in screenshots[:10]:
+        filename = os.path.basename(filepath)
+        mtime = os.path.getmtime(filepath)
+        results.append({
+            "filename": filename,
+            "timestamp": mtime,
+            "url": f"/api/integrations/leadfeeder/screenshots/{filename}"
+        })
+
+    return jsonify({"screenshots": results})
+
+
+@app.route("/api/integrations/leadfeeder/screenshots/<filename>", methods=["GET"])
+def leadfeeder_screenshot_file(filename):
+    """Serve a specific screenshot file."""
+    import os
+    from flask import send_file
+
+    screenshot_dir = "/tmp/leadfeeder_screenshots"
+    filepath = os.path.join(screenshot_dir, filename)
+
+    # Security: ensure the file is within the screenshot directory
+    if not os.path.abspath(filepath).startswith(os.path.abspath(screenshot_dir)):
+        return jsonify({"error": "Invalid filename"}), 400
+
+    if not os.path.exists(filepath):
+        return jsonify({"error": "Screenshot not found"}), 404
+
+    return send_file(filepath, mimetype='image/png')
+
+
 @app.route("/api/scheduler/status", methods=["GET"])
 def scheduler_status():
     """Get background job scheduler status."""

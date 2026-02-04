@@ -7,6 +7,8 @@ function VisitorAnalytics({ fetchApi }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [screenshots, setScreenshots] = useState([]);
+  const [showScreenshots, setShowScreenshots] = useState(false);
 
   useEffect(() => {
     loadAllData();
@@ -26,6 +28,11 @@ function VisitorAnalytics({ fetchApi }) {
       setAnalytics(analyticsData);
       setLeadfeederStatus(lfStatus);
       setSchedulerStatus(schedStatus);
+
+      // Load screenshots if Leadfeeder is configured
+      if (lfStatus?.configured) {
+        loadScreenshots();
+      }
     } catch (err) {
       setError(err.message || "Failed to load analytics");
     } finally {
@@ -42,13 +49,25 @@ function VisitorAnalytics({ fetchApi }) {
       if (result.success) {
         alert(`Sync complete! Scraped ${result.companies_scraped} companies.`);
         loadAllData();
+        loadScreenshots(); // Load screenshots after sync
       } else {
         alert(`Sync failed: ${result.error}`);
+        loadScreenshots(); // Load screenshots even on failure to see what happened
       }
     } catch (err) {
       alert(`Sync error: ${err.message}`);
+      loadScreenshots(); // Load screenshots even on error
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const loadScreenshots = async () => {
+    try {
+      const data = await fetchApi("/api/integrations/leadfeeder/screenshots");
+      setScreenshots(data.screenshots || []);
+    } catch (err) {
+      console.error("Failed to load screenshots:", err);
     }
   };
 
@@ -203,13 +222,23 @@ function VisitorAnalytics({ fetchApi }) {
                   <span>{new Date(leadfeederStatus.status.last_sync_at).toLocaleString()}</span>
                 </div>
               )}
-              <button
-                className="primary-button"
-                onClick={handleManualSync}
-                disabled={syncing}
-              >
-                {syncing ? "Syncing..." : "Sync Now"}
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button
+                  className="primary-button"
+                  onClick={handleManualSync}
+                  disabled={syncing}
+                >
+                  {syncing ? "Syncing..." : "Sync Now"}
+                </button>
+                {screenshots.length > 0 && (
+                  <button
+                    className="secondary-button"
+                    onClick={() => setShowScreenshots(true)}
+                  >
+                    View Screenshots ({screenshots.length})
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -305,6 +334,41 @@ function VisitorAnalytics({ fetchApi }) {
           </button>
         </div>
       </div>
+
+      {/* Screenshot Viewer Modal */}
+      {showScreenshots && (
+        <div className="modal-overlay" onClick={() => setShowScreenshots(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "900px", maxHeight: "90vh", overflow: "auto" }}>
+            <div className="modal-header">
+              <h3>Leadfeeder Scrape Screenshots</h3>
+              <button className="close-button" onClick={() => setShowScreenshots(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              {screenshots.length === 0 ? (
+                <p className="muted">No screenshots available. Run a sync to generate screenshots.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                  {screenshots.map((screenshot, idx) => (
+                    <div key={idx} style={{ border: "1px solid #ddd", borderRadius: "8px", padding: "1rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                        <strong>{screenshot.filename}</strong>
+                        <span className="muted">
+                          {new Date(screenshot.timestamp * 1000).toLocaleString()}
+                        </span>
+                      </div>
+                      <img
+                        src={screenshot.url}
+                        alt={screenshot.filename}
+                        style={{ width: "100%", border: "1px solid #eee", borderRadius: "4px" }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
