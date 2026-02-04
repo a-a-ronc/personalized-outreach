@@ -109,20 +109,42 @@ class LeadfeederScraper:
             email_field = WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
             )
-            logger.info("Email field found")
+
+            # Log field details for debugging
+            is_visible = email_field.is_displayed()
+            is_enabled = email_field.is_enabled()
+            field_id = email_field.get_attribute("id")
+            field_name = email_field.get_attribute("name")
+            logger.info(f"Email field found - visible: {is_visible}, enabled: {is_enabled}, id: {field_id}, name: {field_name}")
 
             # Find password field
             logger.info("Looking for password field...")
             password_field = self.driver.find_element(By.CSS_SELECTOR, "input[type='password'], input[name='password']")
-            logger.info("Password field found")
+
+            # Log password field details
+            pwd_visible = password_field.is_displayed()
+            pwd_enabled = password_field.is_enabled()
+            pwd_id = password_field.get_attribute("id")
+            pwd_name = password_field.get_attribute("name")
+            logger.info(f"Password field found - visible: {pwd_visible}, enabled: {pwd_enabled}, id: {pwd_id}, name: {pwd_name}")
 
             # Enter credentials like a human would
             logger.info(f"Entering email: {self.email[:3]}...{self.email[-10:]}")
             self._type_slowly(email_field, self.email)
+
+            # Verify email was entered
+            email_value = email_field.get_attribute("value")
+            logger.info(f"Email field value after typing: '{email_value[:3]}...{email_value[-10:] if len(email_value) > 10 else email_value}' (length: {len(email_value)})")
+
             self._human_delay(0.8, 1.5)  # Pause after email like a human
 
             logger.info("Entering password...")
             self._type_slowly(password_field, self.password)
+
+            # Verify password was entered
+            pwd_value = password_field.get_attribute("value")
+            logger.info(f"Password field has {len(pwd_value)} characters")
+
             self._human_delay(1, 2)  # Pause before clicking login
             logger.info("Credentials entered")
 
