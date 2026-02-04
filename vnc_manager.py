@@ -89,7 +89,6 @@ class VNCManager:
                 self.websockify_process = subprocess.Popen(
                     [
                         sys.executable, "-m", "websockify",
-                        "--web", "/dev/null",  # No web files needed, we'll serve our own
                         str(self.websocket_port),
                         f"localhost:{self.vnc_port}"
                     ],
