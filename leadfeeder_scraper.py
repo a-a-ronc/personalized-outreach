@@ -75,29 +75,23 @@ class LeadfeederScraper:
         time.sleep(random.uniform(min_seconds, max_seconds))
 
     def _type_slowly(self, element, text: str):
-        """Type text character by character with random delays and trigger JS events."""
+        """Type text character by character with human-like delays."""
         # Click to focus the field first
         element.click()
-        time.sleep(0.1)
+        time.sleep(random.uniform(0.3, 0.6))
 
         # Clear any existing value
         element.clear()
-        time.sleep(0.1)
+        time.sleep(random.uniform(0.2, 0.4))
 
-        # Type character by character
-        for char in text:
+        # Type character by character with varied delays
+        for i, char in enumerate(text):
             element.send_keys(char)
-            time.sleep(random.uniform(0.05, 0.15))
-
-        # Trigger JavaScript events that modern forms expect
-        try:
-            self.driver.execute_script("""
-                arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-                arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
-            """, element)
-        except Exception as e:
-            logger.debug(f"Failed to trigger JS events: {e}")
+            # Vary typing speed - faster in middle, slower at start/end
+            if i < 3 or i > len(text) - 3:
+                time.sleep(random.uniform(0.15, 0.25))  # Slower at edges
+            else:
+                time.sleep(random.uniform(0.08, 0.15))  # Faster in middle
 
     def login(self) -> bool:
         """Login to Leadfeeder."""
@@ -106,9 +100,9 @@ class LeadfeederScraper:
             return False
 
         try:
-            logger.info("Navigating to Leadfeeder login page...")
+            logger.info("Navigating to Dealfront/Leadfeeder login page...")
             self.driver.get(self.LEADFEEDER_LOGIN_URL)
-            self._human_delay(2, 4)
+            self._human_delay(3, 5)  # Give page time to fully load
 
             # Wait for login form
             logger.info("Waiting for email field...")
@@ -122,44 +116,14 @@ class LeadfeederScraper:
             password_field = self.driver.find_element(By.CSS_SELECTOR, "input[type='password'], input[name='password']")
             logger.info("Password field found")
 
-            # Enter credentials using JavaScript for better compatibility with React forms
+            # Enter credentials like a human would
             logger.info(f"Entering email: {self.email[:3]}...{self.email[-10:]}")
-            try:
-                # Set value via JavaScript and trigger all necessary events
-                self.driver.execute_script("""
-                    var emailField = arguments[0];
-                    var emailValue = arguments[1];
-                    emailField.focus();
-                    emailField.value = emailValue;
-                    emailField.dispatchEvent(new Event('input', { bubbles: true }));
-                    emailField.dispatchEvent(new Event('change', { bubbles: true }));
-                    emailField.dispatchEvent(new Event('blur', { bubbles: true }));
-                """, email_field, self.email)
-                logger.info("Email set via JavaScript")
-            except Exception as e:
-                logger.warning(f"Failed to set email via JS, using typing: {e}")
-                self._type_slowly(email_field, self.email)
-
-            self._human_delay(0.5, 1)
+            self._type_slowly(email_field, self.email)
+            self._human_delay(0.8, 1.5)  # Pause after email like a human
 
             logger.info("Entering password...")
-            try:
-                # Set password via JavaScript
-                self.driver.execute_script("""
-                    var pwdField = arguments[0];
-                    var pwdValue = arguments[1];
-                    pwdField.focus();
-                    pwdField.value = pwdValue;
-                    pwdField.dispatchEvent(new Event('input', { bubbles: true }));
-                    pwdField.dispatchEvent(new Event('change', { bubbles: true }));
-                    pwdField.dispatchEvent(new Event('blur', { bubbles: true }));
-                """, password_field, self.password)
-                logger.info("Password set via JavaScript")
-            except Exception as e:
-                logger.warning(f"Failed to set password via JS, using typing: {e}")
-                self._type_slowly(password_field, self.password)
-
-            self._human_delay(0.5, 1)
+            self._type_slowly(password_field, self.password)
+            self._human_delay(1, 2)  # Pause before clicking login
             logger.info("Credentials entered")
 
             # Find and click login button
@@ -167,6 +131,9 @@ class LeadfeederScraper:
             login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
             button_text = login_button.text
             logger.info(f"Login button found: '{button_text}'")
+
+            # Small pause before clicking like a human would
+            self._human_delay(0.5, 1)
             login_button.click()
             logger.info("Login button clicked, waiting for redirect...")
 
