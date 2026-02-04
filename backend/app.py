@@ -3918,6 +3918,197 @@ def leadfeeder_screenshot_file(filename):
     return send_file(filepath, mimetype='image/png')
 
 
+@app.route("/api/integrations/leadfeeder/vnc/status", methods=["GET"])
+def leadfeeder_vnc_status():
+    """Get VNC server status."""
+    try:
+        from vnc_manager import get_vnc_manager
+        vnc = get_vnc_manager()
+        return jsonify({
+            "running": vnc.is_running(),
+            "websocket_port": vnc.websocket_port if vnc.is_running() else None,
+            "display": vnc.display if vnc.is_running() else None
+        })
+    except Exception as e:
+        return jsonify({"running": False, "error": str(e)})
+
+
+@app.route("/vnc-viewer")
+def vnc_viewer():
+    """Serve simple VNC viewer page."""
+    return """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leadfeeder Scraper - Live View</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            font-family: system-ui, -apple-system, sans-serif;
+            color: #fff;
+        }
+        .header {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #2a2a2a;
+            border-radius: 8px;
+        }
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+        }
+        .status {
+            color: #888;
+            font-size: 14px;
+        }
+        .status.connected {
+            color: #4ade80;
+        }
+        #screen {
+            border: 2px solid #333;
+            border-radius: 8px;
+            background: #000;
+            max-width: 100%;
+        }
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        .error {
+            color: #ef4444;
+            margin-top: 10px;
+            padding: 10px;
+            background: #2a1a1a;
+            border-radius: 6px;
+            border-left: 3px solid #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 Leadfeeder Scraper - Live View</h1>
+        <div class="status" id="status">Connecting to VNC server...</div>
+    </div>
+
+    <canvas id="screen" width="1920" height="1080"></canvas>
+
+    <div class="controls">
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+    </div>
+
+    <div id="error" class="error" style="display:none;"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noVNC/1.4.0/core/rfb.min.js"></script>
+    <script>
+        let rfb = null;
+        const canvas = document.getElementById('screen');
+        const status = document.getElementById('status');
+        const error = document.getElementById('error');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+
+        function showError(msg) {
+            error.textContent = msg;
+            error.style.display = 'block';
+        }
+
+        function hideError() {
+            error.style.display = 'none';
+        }
+
+        function updateStatus(msg, connected = false) {
+            status.textContent = msg;
+            status.className = connected ? 'status connected' : 'status';
+        }
+
+        function connect() {
+            hideError();
+            updateStatus('Connecting...');
+            connectBtn.disabled = true;
+
+            try {
+                const host = window.location.hostname;
+                const port = window.location.port || '80';
+                const vncPort = '6080'; // WebSocket port
+
+                // Construct WebSocket URL
+                const wsUrl = `ws://${host}:${vncPort}`;
+
+                rfb = new RFB(canvas, wsUrl, {
+                    credentials: { password: '' }
+                });
+
+                rfb.addEventListener('connect', () => {
+                    updateStatus('✓ Connected - Watching browser live', true);
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                });
+
+                rfb.addEventListener('disconnect', () => {
+                    updateStatus('Disconnected');
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    rfb = null;
+                });
+
+                rfb.addEventListener('credentialsrequired', () => {
+                    showError('Password required (not configured)');
+                });
+
+                rfb.addEventListener('securityfailure', (e) => {
+                    showError('Security failure: ' + e.detail.reason);
+                    connectBtn.disabled = false;
+                });
+
+                rfb.scaleViewport = true;
+                rfb.resizeSession = false;
+
+            } catch (err) {
+                showError('Connection failed: ' + err.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        function disconnect() {
+            if (rfb) {
+                rfb.disconnect();
+                rfb = null;
+            }
+            updateStatus('Disconnected');
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+        }
+
+        // Auto-connect on load
+        window.addEventListener('load', () => {
+            setTimeout(connect, 1000);
+        });
+    </script>
+</body>
+</html>
+    """
+
+
 @app.route("/api/scheduler/status", methods=["GET"])
 def scheduler_status():
     """Get background job scheduler status."""

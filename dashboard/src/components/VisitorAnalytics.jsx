@@ -222,7 +222,7 @@ function VisitorAnalytics({ fetchApi }) {
                   <span>{new Date(leadfeederStatus.status.last_sync_at).toLocaleString()}</span>
                 </div>
               )}
-              <div style={{ display: "flex", gap: "0.5rem" }}>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                 <button
                   className="primary-button"
                   onClick={handleManualSync}
@@ -230,12 +230,19 @@ function VisitorAnalytics({ fetchApi }) {
                 >
                   {syncing ? "Syncing..." : "Sync Now"}
                 </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => window.open('/vnc-viewer', 'VNC Viewer', 'width=1920,height=1080')}
+                  title="Watch the browser in real-time"
+                >
+                  🎥 Watch Live
+                </button>
                 {screenshots.length > 0 && (
                   <button
                     className="secondary-button"
                     onClick={() => setShowScreenshots(true)}
                   >
-                    View Screenshots ({screenshots.length})
+                    📸 View Screenshots ({screenshots.length})
                   </button>
                 )}
               </div>
