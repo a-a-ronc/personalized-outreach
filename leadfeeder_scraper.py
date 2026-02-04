@@ -75,10 +75,29 @@ class LeadfeederScraper:
         time.sleep(random.uniform(min_seconds, max_seconds))
 
     def _type_slowly(self, element, text: str):
-        """Type text character by character with random delays."""
+        """Type text character by character with random delays and trigger JS events."""
+        # Click to focus the field first
+        element.click()
+        time.sleep(0.1)
+
+        # Clear any existing value
+        element.clear()
+        time.sleep(0.1)
+
+        # Type character by character
         for char in text:
             element.send_keys(char)
             time.sleep(random.uniform(0.05, 0.15))
+
+        # Trigger JavaScript events that modern forms expect
+        try:
+            self.driver.execute_script("""
+                arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
+            """, element)
+        except Exception as e:
+            logger.debug(f"Failed to trigger JS events: {e}")
 
     def login(self) -> bool:
         """Login to Leadfeeder."""
