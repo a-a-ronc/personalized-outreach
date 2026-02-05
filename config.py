@@ -47,8 +47,9 @@ class Config:
     MAXMIND_ASN_DB_PATH = BASE_DIR / "data" / "GeoLite2-ASN.mmdb"
 
     # Leadfeeder Configuration
-    LEADFEEDER_EMAIL = os.getenv("LEADFEEDER_EMAIL")
-    LEADFEEDER_PASSWORD = os.getenv("LEADFEEDER_PASSWORD")
+    LEADFEEDER_API_KEY = os.getenv("LEADFEEDER_API_KEY")  # Preferred: API token for direct access
+    LEADFEEDER_EMAIL = os.getenv("LEADFEEDER_EMAIL")  # Legacy: For web scraping fallback
+    LEADFEEDER_PASSWORD = os.getenv("LEADFEEDER_PASSWORD")  # Legacy: For web scraping fallback
     LEADFEEDER_SCRAPE_DAY = 5  # Days before data expires (Leadfeeder free = 7 days)
 
     # Visitor Tracking Configuration

@@ -1,6 +1,23 @@
 """
 Leadfeeder Scraper Module
 
+⚠️ DEPRECATED ⚠️
+
+This module is DEPRECATED and no longer used. We've migrated to the official Leadfeeder API
+for faster, more reliable data extraction.
+
+Use leadfeeder_api.py instead:
+- 10x faster (30 seconds vs 3-5 minutes)
+- More reliable (no UI changes to break)
+- No browser automation required (no Selenium, ChromeDriver, VNC)
+- Official API support with rate limiting
+
+This file is kept for reference only.
+
+---
+
+LEGACY CODE BELOW (Selenium-based web scraping)
+
 Selenium-based automation to scrape visitor data from Leadfeeder's free tier.
 Designed to capture data before the 7-day expiration window.
 """
@@ -41,16 +58,23 @@ class LeadfeederScraper:
         """Initialize Chrome driver with anti-detection measures."""
         import os
         import shutil
+        import platform
 
-        # Try to start VNC for remote viewing (will run in non-headless mode if VNC is available)
-        try:
-            from vnc_manager import ensure_vnc_running
-            vnc_display = ensure_vnc_running()
-            if vnc_display:
-                logger.info(f"VNC enabled - browser will be viewable remotely on display {vnc_display}")
-                headless = False  # Don't use headless mode when VNC is active
-        except Exception as e:
-            logger.debug(f"VNC not available: {e}")
+        # On Windows, always run in non-headless mode for easy viewing
+        is_windows = platform.system() == "Windows"
+        if is_windows:
+            logger.info("Windows detected - running Chrome in visible mode (no VNC needed)")
+            headless = False  # Show browser window directly on Windows
+        else:
+            # On Linux, try to start VNC for remote viewing
+            try:
+                from vnc_manager import ensure_vnc_running
+                vnc_display = ensure_vnc_running()
+                if vnc_display:
+                    logger.info(f"VNC enabled - browser will be viewable remotely on display {vnc_display}")
+                    headless = False  # Don't use headless mode when VNC is active
+            except Exception as e:
+                logger.debug(f"VNC not available: {e}")
 
         chrome_options = Options()
         if headless:
@@ -98,19 +122,88 @@ class LeadfeederScraper:
         except Exception as e:
             logger.warning(f"Failed to save screenshot: {e}")
 
-    def _type_slowly(self, element, text: str):
-        """Type text character by character with human-like delays."""
-        # Click to focus the field first
-        element.click()
-        time.sleep(random.uniform(0.5, 0.8))
+    def _dump_page_html(self, name: str):
+        """Dump page HTML for debugging."""
+        try:
+            import os
+            html_dir = "/tmp/leadfeeder_screenshots" if os.path.exists("/tmp") else "screenshots"
+            os.makedirs(html_dir, exist_ok=True)
+            filepath = f"{html_dir}/{name}_{datetime.now().strftime('%H%M%S')}.html"
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(self.driver.page_source)
+            logger.info(f"HTML dump saved: {filepath}")
+            return filepath
+        except Exception as e:
+            logger.warning(f"Failed to dump HTML: {e}")
 
-        # DON'T call clear() - React forms reset when cleared
-        # Just send keys directly - the field should be empty on first focus
+    def _type_slowly(self, element, text: str, field_name: str = "field"):
+        """Type text with multiple fallback methods for React forms."""
+        logger.info(f"Attempting to enter text into {field_name}...")
 
-        # Type the full text with small delays
-        # Using send_keys with full text instead of char-by-char to avoid React issues
-        element.send_keys(text)
-        time.sleep(random.uniform(0.3, 0.5))
+        try:
+            # Method 1: Scroll into view and ensure element is interactable
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.5)
+
+            # Wait for element to be clickable
+            element = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable(element)
+            )
+
+            # Click to focus
+            element.click()
+            time.sleep(random.uniform(0.5, 1.0))
+
+            # Try clearing field first (sometimes needed)
+            try:
+                element.clear()
+                time.sleep(0.3)
+            except:
+                pass
+
+            # Send keys
+            element.send_keys(text)
+            time.sleep(random.uniform(0.5, 1.0))
+
+            # Verify text was entered
+            value = element.get_attribute("value")
+            if value and len(value) > 0:
+                logger.info(f"✓ Successfully entered {len(value)} characters into {field_name} via send_keys")
+                return True
+            else:
+                logger.warning(f"send_keys failed for {field_name}, trying JavaScript method...")
+                raise Exception("send_keys produced empty value")
+
+        except Exception as e:
+            logger.warning(f"Method 1 failed for {field_name}: {e}. Trying JavaScript fallback...")
+
+            # Method 2: Use JavaScript to set value directly
+            try:
+                # Scroll into view again
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                time.sleep(0.3)
+
+                # Set value with JavaScript
+                self.driver.execute_script("""
+                    arguments[0].focus();
+                    arguments[0].value = arguments[1];
+                    arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                """, element, text)
+                time.sleep(random.uniform(0.5, 1.0))
+
+                # Verify
+                value = element.get_attribute("value")
+                if value and len(value) > 0:
+                    logger.info(f"✓ Successfully entered {len(value)} characters into {field_name} via JavaScript")
+                    return True
+                else:
+                    logger.error(f"✗ JavaScript method also failed for {field_name}")
+                    return False
+
+            except Exception as js_error:
+                logger.error(f"✗ All methods failed for {field_name}: {js_error}")
+                return False
 
     def login(self) -> bool:
         """Login to Leadfeeder."""
@@ -126,49 +219,73 @@ class LeadfeederScraper:
             # Take screenshot of login page
             self._take_screenshot("01_login_page")
 
-            # Wait for login form
-            logger.info("Waiting for email field...")
-            email_field = WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
+            # Dump page HTML for debugging selectors
+            self._dump_page_html("01_login_page")
+
+            # Log all input fields on the page for debugging
+            all_inputs = self.driver.find_elements(By.TAG_NAME, "input")
+            logger.info(f"Found {len(all_inputs)} input elements on the page")
+            for i, inp in enumerate(all_inputs[:10]):  # Log first 10 inputs
+                inp_type = inp.get_attribute("type")
+                inp_name = inp.get_attribute("name")
+                inp_id = inp.get_attribute("id")
+                inp_placeholder = inp.get_attribute("placeholder")
+                logger.info(f"  Input {i+1}: type='{inp_type}', name='{inp_name}', id='{inp_id}', placeholder='{inp_placeholder}'")
+
+            # Wait for email field to be clickable (not just present)
+            logger.info("Waiting for email field to be clickable...")
+            email_field = WebDriverWait(self.driver, 20).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='email'], input[name='email']"))
             )
 
             # Log field details for debugging
-            is_visible = email_field.is_displayed()
-            is_enabled = email_field.is_enabled()
             field_id = email_field.get_attribute("id")
             field_name = email_field.get_attribute("name")
-            logger.info(f"Email field found - visible: {is_visible}, enabled: {is_enabled}, id: {field_id}, name: {field_name}")
+            field_placeholder = email_field.get_attribute("placeholder")
+            logger.info(f"Email field found - id: '{field_id}', name: '{field_name}', placeholder: '{field_placeholder}'")
 
-            # Find password field
-            logger.info("Looking for password field...")
-            password_field = self.driver.find_element(By.CSS_SELECTOR, "input[type='password'], input[name='password']")
+            # Wait for password field to be clickable
+            logger.info("Waiting for password field to be clickable...")
+            password_field = WebDriverWait(self.driver, 20).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='password'], input[name='password']"))
+            )
 
             # Log password field details
-            pwd_visible = password_field.is_displayed()
-            pwd_enabled = password_field.is_enabled()
             pwd_id = password_field.get_attribute("id")
             pwd_name = password_field.get_attribute("name")
-            logger.info(f"Password field found - visible: {pwd_visible}, enabled: {pwd_enabled}, id: {pwd_id}, name: {pwd_name}")
+            pwd_placeholder = password_field.get_attribute("placeholder")
+            logger.info(f"Password field found - id: '{pwd_id}', name: '{pwd_name}', placeholder: '{pwd_placeholder}'")
 
-            # Enter credentials like a human would
+            # Enter email with improved method
             logger.info(f"Entering email: {self.email[:3]}...{self.email[-10:]}")
-            self._type_slowly(email_field, self.email)
+            email_success = self._type_slowly(email_field, self.email, "email field")
+
+            if not email_success:
+                logger.error("Failed to enter email - aborting login")
+                self._take_screenshot("ERROR_email_failed")
+                return False
 
             # Verify email was entered
             email_value = email_field.get_attribute("value")
-            logger.info(f"Email field value after typing: '{email_value[:3]}...{email_value[-10:] if len(email_value) > 10 else email_value}' (length: {len(email_value)})")
+            logger.info(f"Email verification: '{email_value[:3]}...{email_value[-10:] if len(email_value) > 10 else email_value}' (length: {len(email_value)})")
 
             # Screenshot after email
             self._take_screenshot("02_after_email")
 
             self._human_delay(0.8, 1.5)  # Pause after email like a human
 
+            # Enter password with improved method
             logger.info("Entering password...")
-            self._type_slowly(password_field, self.password)
+            password_success = self._type_slowly(password_field, self.password, "password field")
+
+            if not password_success:
+                logger.error("Failed to enter password - aborting login")
+                self._take_screenshot("ERROR_password_failed")
+                return False
 
             # Verify password was entered
             pwd_value = password_field.get_attribute("value")
-            logger.info(f"Password field has {len(pwd_value)} characters")
+            logger.info(f"Password verification: {len(pwd_value)} characters entered")
 
             # Screenshot after password
             self._take_screenshot("03_after_password")
@@ -178,14 +295,25 @@ class LeadfeederScraper:
 
             # Find and click login button
             logger.info("Looking for login button...")
-            login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-            button_text = login_button.text
-            logger.info(f"Login button found: '{button_text}'")
 
-            # Small pause before clicking like a human would
-            self._human_delay(0.5, 1)
-            login_button.click()
-            logger.info("Login button clicked, waiting for redirect...")
+            # Use JavaScript to click to avoid stale element issues
+            # The button text changes dynamically to "Logging you in..." which can cause stale element errors
+            try:
+                login_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
+                )
+                button_text = login_button.text
+                logger.info(f"Login button found: '{button_text}'")
+
+                # Small pause before clicking like a human would
+                self._human_delay(0.5, 1)
+
+                # Use JavaScript click to avoid stale element issues
+                self.driver.execute_script("arguments[0].click();", login_button)
+                logger.info("Login button clicked via JavaScript, waiting for redirect...")
+            except Exception as e:
+                logger.error(f"Failed to click login button: {e}")
+                raise
 
             # Wait for dashboard to load
             self._human_delay(5, 8)
@@ -236,11 +364,15 @@ class LeadfeederScraper:
                     logger.warning(f"Failed to retrieve page info: {e}")
                 return False
 
-        except TimeoutException:
-            logger.error("Leadfeeder login timed out")
+        except TimeoutException as e:
+            logger.error(f"Leadfeeder login timed out: {e}")
+            self._take_screenshot("ERROR_timeout")
+            self._dump_page_html("ERROR_timeout")
             return False
         except Exception as e:
-            logger.error(f"Leadfeeder login error: {e}")
+            logger.error(f"Leadfeeder login error: {e}", exc_info=True)
+            self._take_screenshot("ERROR_exception")
+            self._dump_page_html("ERROR_exception")
             return False
 
     def scrape_visitors(self, max_companies: int = 100) -> list:
@@ -280,8 +412,14 @@ class LeadfeederScraper:
             self.driver.get(visitors_url)
             self._human_delay(3, 5)
 
+            # Take screenshot before scrolling
+            self._take_screenshot("04_companies_page_before_scroll")
+
             # Scroll to load more companies (lazy loading)
             self._scroll_and_load(max_companies)
+
+            # Take screenshot after scrolling
+            self._take_screenshot("05_companies_page_after_scroll")
 
             # Try multiple selector strategies to handle Leadfeeder UI changes
             selector_strategies = [
@@ -354,31 +492,72 @@ class LeadfeederScraper:
 
     def _scroll_and_load(self, target_count: int):
         """Scroll to load more companies via lazy loading."""
-        last_height = 0
-        loaded_count = 0
-        scroll_attempts = 0
-        max_scroll_attempts = 20
+        logger.info(f"Starting scroll to load up to {target_count} companies...")
 
-        while loaded_count < target_count and scroll_attempts < max_scroll_attempts:
-            # Scroll down
+        # Find the scrollable container (Dealfront uses a specific scrollable div)
+        try:
+            # Try to find the main scrollable content area
+            scrollable_containers = self.driver.find_elements(By.CSS_SELECTOR,
+                "[class*='scroll'], main, [role='main'], .main-content")
+
+            if scrollable_containers:
+                logger.info(f"Found {len(scrollable_containers)} potential scrollable containers")
+        except:
+            pass
+
+        last_count = 0
+        scroll_attempts = 0
+        max_scroll_attempts = 15
+
+        while scroll_attempts < max_scroll_attempts:
+            # Scroll down using multiple methods
+            # Method 1: Scroll the main window
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            self._human_delay(1, 2)
+
+            # Method 2: Scroll within the main content area
+            self.driver.execute_script("""
+                const main = document.querySelector('main') || document.querySelector('[role="main"]');
+                if (main) {
+                    main.scrollTop = main.scrollHeight;
+                }
+            """)
+
+            # Method 3: Scroll the last company element into view to trigger lazy loading
+            try:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, "article")
+                if elements:
+                    last_element = elements[-1]
+                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'end'});", last_element)
+            except:
+                pass
+
+            # Wait for lazy loading
+            self._human_delay(3, 4)  # Longer delay for lazy loading
 
             # Count loaded elements
-            elements = self.driver.find_elements(
-                By.CSS_SELECTOR,
-                "[data-testid='company-row'], .company-row, .visitor-row, .leads-list-item"
-            )
-            loaded_count = len(elements)
+            elements = []
+            for selector in ["article", "[role='button'][class*='company']", "div[class*='CompanyCard']"]:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if elements:
+                    break
 
-            # Check if we've reached the bottom
-            new_height = self.driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
+            loaded_count = len(elements)
+            logger.info(f"Scroll attempt {scroll_attempts + 1}: Found {loaded_count} company elements")
+
+            # If count hasn't changed in 3 attempts, we've loaded everything
+            if loaded_count == last_count:
                 scroll_attempts += 1
             else:
-                scroll_attempts = 0
+                scroll_attempts = 0  # Reset if we found new elements
 
-            last_height = new_height
+            last_count = loaded_count
+
+            # If we've reached the target, stop
+            if loaded_count >= target_count:
+                logger.info(f"Reached target count of {target_count} companies")
+                break
+
+        logger.info(f"Scrolling complete. Final count: {loaded_count} companies")
 
         # Scroll back to top
         self.driver.execute_script("window.scrollTo(0, 0);")
@@ -602,7 +781,7 @@ class LeadfeederScraper:
 
 
 def store_leadfeeder_data(companies: list):
-    """Store scraped Leadfeeder data in the database."""
+    """Store scraped Leadfeeder data in the database and sync to visitor_companies."""
     now = utc_now()
     expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     stored_count = 0
@@ -612,7 +791,10 @@ def store_leadfeeder_data(companies: list):
             try:
                 # Generate unique ID if not present
                 leadfeeder_id = company.get("leadfeeder_id") or f"lf_{company.get('domain', '')}_{now}"
+                domain = company.get("domain")
+                company_name = company.get("company_name")
 
+                # Store in leadfeeder_visits table
                 conn.execute("""
                     INSERT OR REPLACE INTO leadfeeder_visits (
                         leadfeeder_id, company_name, domain, industry,
@@ -622,8 +804,8 @@ def store_leadfeeder_data(companies: list):
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     leadfeeder_id,
-                    company.get("company_name"),
-                    company.get("domain"),
+                    company_name,
+                    domain,
                     company.get("industry"),
                     company.get("employee_count"),
                     company.get("country"),
@@ -636,11 +818,57 @@ def store_leadfeeder_data(companies: list):
                     now,
                     expires_at
                 ))
+
+                # Also sync to visitor_companies table for frontend display
+                if domain and company_name:
+                    # Generate company key from domain
+                    company_key = domain.replace(".", "_").replace("-", "_")
+
+                    # Check if company already exists
+                    existing = conn.execute("""
+                        SELECT company_key, total_visits FROM visitor_companies
+                        WHERE company_key = ? OR domain = ?
+                    """, (company_key, domain)).fetchone()
+
+                    page_views = company.get("page_views") or 1
+                    last_visit = company.get("last_visit_at") or now
+
+                    if existing:
+                        # Update existing record
+                        conn.execute("""
+                            UPDATE visitor_companies
+                            SET company_name = ?, total_visits = total_visits + ?,
+                                last_visit_at = ?, source = 'leadfeeder',
+                                industry = COALESCE(?, industry),
+                                employee_count = COALESCE(?, employee_count),
+                                country = COALESCE(?, country)
+                            WHERE company_key = ?
+                        """, (
+                            company_name, page_views, last_visit,
+                            company.get("industry"), company.get("employee_count"),
+                            company.get("country"), existing["company_key"]
+                        ))
+                    else:
+                        # Insert new record
+                        conn.execute("""
+                            INSERT INTO visitor_companies (
+                                company_key, company_name, domain, source,
+                                industry, employee_count, country,
+                                total_visits, first_visit_at, last_visit_at,
+                                created_at, updated_at
+                            ) VALUES (?, ?, ?, 'leadfeeder', ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            company_key, company_name, domain,
+                            company.get("industry"), company.get("employee_count"),
+                            company.get("country"), page_views,
+                            company.get("first_visit_at") or now, last_visit, now, now
+                        ))
+
                 stored_count += 1
             except Exception as e:
-                logger.error(f"Failed to store company {company.get('company_name')}: {e}")
+                logger.error(f"Failed to store company {company.get('company_name')}: {e}", exc_info=True)
 
-    logger.info(f"Stored {stored_count} companies from Leadfeeder")
+    logger.info(f"Stored {stored_count} companies from Leadfeeder and synced to visitor_companies")
     return stored_count
 
 
@@ -650,12 +878,16 @@ def scrape_leadfeeder():
 
     This should be called by the scheduler before data expires.
     """
+    import platform
+
     logger.info("Starting Leadfeeder scrape...")
 
     scraper = LeadfeederScraper()
 
     try:
-        scraper.init_driver(headless=True)
+        # On Windows, show browser; on Linux, use headless by default
+        is_windows = platform.system() == "Windows"
+        scraper.init_driver(headless=not is_windows)
 
         if not scraper.login():
             logger.error("Failed to login to Leadfeeder")

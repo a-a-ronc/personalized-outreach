@@ -3860,7 +3860,7 @@ def visitor_find_contacts(company_key):
 @app.route("/api/integrations/leadfeeder/status", methods=["GET"])
 def leadfeeder_status():
     """Check Leadfeeder integration status."""
-    from leadfeeder_scraper import get_leadfeeder_status
+    from leadfeeder_api import get_leadfeeder_status
 
     status = get_leadfeeder_status()
     return jsonify(status)
@@ -3868,10 +3868,14 @@ def leadfeeder_status():
 
 @app.route("/api/integrations/leadfeeder/sync", methods=["POST"])
 def leadfeeder_manual_sync():
-    """Manually trigger Leadfeeder scrape."""
-    from leadfeeder_scraper import scrape_leadfeeder
+    """Manually trigger Leadfeeder API sync."""
+    from leadfeeder_api import sync_leadfeeder_data
 
-    result = scrape_leadfeeder()
+    # Get optional parameters from request
+    days_back = request.json.get("days_back", 7) if request.json else 7
+    account_id = request.json.get("account_id") if request.json else None
+
+    result = sync_leadfeeder_data(days_back=days_back, account_id=account_id)
     return jsonify(result)
 
 

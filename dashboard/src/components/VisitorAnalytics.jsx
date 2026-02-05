@@ -252,7 +252,7 @@ function VisitorAnalytics({ fetchApi }) {
           {!leadfeederStatus?.configured && (
             <div className="integration-setup">
               <p className="muted">
-                Set LEADFEEDER_EMAIL and LEADFEEDER_PASSWORD in your .env file to enable Leadfeeder integration.
+                Set LEADFEEDER_API_KEY in your .env file (or Railway env vars) to enable Leadfeeder integration.
               </p>
             </div>
           )}

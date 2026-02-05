@@ -13,6 +13,7 @@ function VisitorTable({ fetchApi }) {
   const [error, setError] = useState("");
   const [detailVisitor, setDetailVisitor] = useState(null);
   const [total, setTotal] = useState(0);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     loadVisitors();
@@ -102,6 +103,33 @@ function VisitorTable({ fetchApi }) {
     }
   };
 
+  const handleSyncLeadfeeder = async () => {
+    if (!confirm('This will open a Chrome browser window where you can watch the Leadfeeder login process. Continue?')) {
+      return;
+    }
+
+    setSyncing(true);
+    setError("");
+
+    try {
+      const result = await fetchApi('/api/integrations/leadfeeder/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (result.success) {
+        alert(`Leadfeeder sync complete! Scraped ${result.companies_scraped} companies.`);
+        loadVisitors();
+      } else {
+        setError(`Leadfeeder sync failed: ${result.error}`);
+      }
+    } catch (err) {
+      setError(err.message || "Failed to sync Leadfeeder");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const getSourceBadge = (source) => {
     const colors = {
       diy: "status-sent",
@@ -158,6 +186,16 @@ function VisitorTable({ fetchApi }) {
               Find Contacts ({selectedVisitors.size})
             </button>
           )}
+          <button
+            className="btn-secondary"
+            onClick={handleSyncLeadfeeder}
+            disabled={syncing}
+          >
+            {syncing ? "Syncing..." : "🔄 Sync Leadfeeder"}
+          </button>
+          <button className="btn-secondary" onClick={loadVisitors}>
+            Refresh
+          </button>
         </div>
       </div>
 

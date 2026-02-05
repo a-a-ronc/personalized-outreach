@@ -314,10 +314,14 @@ Deploy to Railway for 24/7 uptime and visitor tracking:
 ### Deployment & Configuration
 - **[RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)** - Production deployment guide
 - **[BASE_URL_GUIDE.md](BASE_URL_GUIDE.md)** - Configure BASE_URL from local to production
+- **[AUTHENTICATION_SETUP.md](AUTHENTICATION_SETUP.md)** - Secure your platform with user authentication
 - **[MCP_SETUP.md](MCP_SETUP.md)** - Claude Desktop integration setup
 
 ### Integrations
 - **[LEADFEEDER_SETUP.md](LEADFEEDER_SETUP.md)** - Website visitor identification with Leadfeeder
+
+### Testing & Verification
+- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Test your setup before deployment
 
 ### Technical Reference
 - **[IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md)** - Technical documentation

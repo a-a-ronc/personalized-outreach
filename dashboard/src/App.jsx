@@ -908,7 +908,19 @@ function App() {
           {/* PEOPLE SECTION */}
           {activeSection === "people" && (
             <div className="people-view">
-              <PeopleTable campaignId={activeId} fetchApi={fetchApi} />
+              {!activeId ? (
+                <div className="panel">
+                  <div className="panel-header">
+                    <h2>People</h2>
+                  </div>
+                  <div className="empty-state">
+                    <p className="muted">Please select a campaign first to view people.</p>
+                    <p className="muted">Select a campaign from the list on the left.</p>
+                  </div>
+                </div>
+              ) : (
+                <PeopleTable campaignId={activeId} fetchApi={fetchApi} />
+              )}
             </div>
           )}
 
@@ -932,26 +944,35 @@ function App() {
               )}
 
               {activeSubsection === "Content" && (
-                // Render the old "Content" tab content here
-                <div className="legacy-content">
-                  {/* Content tab rendering will go here */}
-                  <p>Content settings (legacy view)</p>
+                <div className="panel">
+                  <div className="panel-header">
+                    <h2>Content Library</h2>
+                  </div>
+                  <div className="panel-body">
+                    <p className="muted">Content templates and library will be available here.</p>
+                  </div>
                 </div>
               )}
 
               {activeSubsection === "Tracking" && (
-                // Render the old "Settings" tab content here
-                <div className="legacy-settings">
-                  {/* Settings tab rendering will go here */}
-                  <p>Tracking settings (legacy view)</p>
+                <div className="panel">
+                  <div className="panel-header">
+                    <h2>Tracking Settings</h2>
+                  </div>
+                  <div className="panel-body">
+                    <p className="muted">Email tracking and analytics configuration will be available here.</p>
+                  </div>
                 </div>
               )}
 
               {activeSubsection === "Analytics" && (
-                // Render the old "Statistics" tab content here
-                <div className="legacy-statistics">
-                  {/* Statistics tab rendering will go here */}
-                  <p>Analytics (legacy view)</p>
+                <div className="panel">
+                  <div className="panel-header">
+                    <h2>Analytics Dashboard</h2>
+                  </div>
+                  <div className="panel-body">
+                    <p className="muted">Campaign analytics and performance metrics will be available here.</p>
+                  </div>
                 </div>
               )}
             </div>

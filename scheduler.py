@@ -3,7 +3,7 @@ Background Scheduler Module
 
 APScheduler-based background job scheduler for:
 - Email warmup advancement (daily)
-- Leadfeeder data scraping (daily)
+- Leadfeeder API sync (daily) - Official API integration
 - IP resolution for new visitors (hourly)
 - Data reconciliation (hourly)
 - MaxMind database updates (weekly)
@@ -76,12 +76,12 @@ def _add_scheduled_jobs():
         replace_existing=True
     )
 
-    # Leadfeeder scrape - Daily at 2 AM UTC
+    # Leadfeeder API sync - Daily at 2 AM UTC
     scheduler.add_job(
         job_leadfeeder_scrape,
         CronTrigger(hour=2, minute=0),
         id="leadfeeder_scrape",
-        name="Leadfeeder Daily Scrape",
+        name="Leadfeeder Daily API Sync",
         replace_existing=True
     )
 
@@ -237,23 +237,23 @@ def job_warmup_advancement():
 
 
 def job_leadfeeder_scrape():
-    """Job: Scrape Leadfeeder data."""
-    logger.info("Starting scheduled Leadfeeder scrape...")
+    """Job: Sync Leadfeeder data via API."""
+    logger.info("Starting scheduled Leadfeeder API sync...")
 
     try:
-        from leadfeeder_scraper import scrape_leadfeeder
-        result = scrape_leadfeeder()
+        from leadfeeder_api import sync_leadfeeder_data
+        result = sync_leadfeeder_data(days_back=7)
 
         if result.get("success"):
             _update_job_status("leadfeeder_scrape", "success")
-            logger.info(f"Leadfeeder scrape completed: {result.get('companies_scraped')} companies")
+            logger.info(f"Leadfeeder API sync completed: {result.get('leads_synced')} leads")
         else:
             _update_job_status("leadfeeder_scrape", "failed", result.get("error"))
-            logger.error(f"Leadfeeder scrape failed: {result.get('error')}")
+            logger.error(f"Leadfeeder API sync failed: {result.get('error')}")
 
     except Exception as e:
         _update_job_status("leadfeeder_scrape", "error", str(e))
-        logger.error(f"Leadfeeder scrape job error: {e}")
+        logger.error(f"Leadfeeder API sync job error: {e}")
 
 
 def job_resolve_pending_ips():
